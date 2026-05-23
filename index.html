@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>roguERGlike Concert ERG</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="video-panel" aria-label="Concert player">
+      <div class="video-stage">
+        <div id="player"></div>
+        <section class="ride-chart-panel" aria-label="Ride timeline">
+          <div class="chart-header">
+          <span>Ride timeline</span>
+          <span class="chart-legend">
+            <i class="legend-good"></i> maintained
+            <i class="legend-low"></i> dropped
+            <label class="timeline-seek-toggle">
+              <input id="timelineSeekToggle" type="checkbox">
+              seek
+            </label>
+          </span>
+          </div>
+          <canvas id="rideChart" height="210"></canvas>
+          <div id="songStrip" class="song-strip" aria-label="Song timeline"></div>
+          <div id="rideChartTooltip" class="chart-tooltip" hidden></div>
+        </section>
+      </div>
+      <div class="transport">
+        <button id="playButton" type="button">Play</button>
+        <button id="pauseButton" type="button">Pause</button>
+        <label class="seek">
+          <span>Seek</span>
+          <input id="seekSlider" type="range" min="0" max="3600" value="0" step="1">
+        </label>
+        <output id="timeOutput">0:00 / 0:00</output>
+      </div>
+    </section>
+
+    <aside class="control-panel" aria-label="Ride controls">
+      <header>
+        <p class="kicker">Concert ERG MVP</p>
+        <h1 id="profileTitle">Loading profile</h1>
+      </header>
+
+      <div class="settings">
+        <label>
+          <span>FTP</span>
+          <input id="ftpInput" type="number" min="100" max="600" step="5" value="250">
+          <small>watts</small>
+        </label>
+        <label>
+          <span>Mode</span>
+          <select id="workoutModeSelect"></select>
+        </label>
+        <label>
+          <span>Weight</span>
+          <input id="weightInput" type="number" min="35" max="160" step="0.5" value="75">
+          <small>kg</small>
+        </label>
+        <label>
+          <span>Warmup</span>
+          <input id="warmupDurationInput" type="text" inputmode="numeric" value="13:53">
+          <small>min:sec</small>
+        </label>
+        <label>
+          <span>Max target</span>
+          <input id="maxTargetInput" type="number" min="100" max="800" step="5" value="420">
+          <small>watts</small>
+        </label>
+        <label>
+          <span>Sidecar</span>
+          <input id="sidecarUrlInput" type="url" value="ws://localhost:8421">
+        </label>
+        <label>
+          <span>Track offset</span>
+          <input id="trackOffsetInput" type="text" inputmode="numeric" value="13:53">
+          <small>min:sec</small>
+        </label>
+      </div>
+
+      <div class="connection-row">
+        <button id="connectButton" type="button">Connect Sidecar</button>
+        <span id="connectionStatus">disconnected</span>
+      </div>
+
+      <div class="metrics" aria-label="Current targets">
+        <div>
+          <span>Target</span>
+          <strong id="targetWatts">0 W</strong>
+        </div>
+        <div>
+          <span>Cadence</span>
+          <strong id="targetCadence">0 rpm</strong>
+        </div>
+        <div>
+          <span>Intensity</span>
+          <strong id="targetPct">0%</strong>
+        </div>
+        <div>
+          <span>Live power</span>
+          <strong id="livePower">0 W</strong>
+        </div>
+        <div>
+          <span>Live cadence</span>
+          <strong id="liveCadence">0 rpm</strong>
+        </div>
+        <div>
+          <span>Heart rate</span>
+          <strong id="liveHr">0 bpm</strong>
+        </div>
+        <div>
+          <span>Est. TSS</span>
+          <strong id="tssEstimate">0</strong>
+        </div>
+        <div>
+          <span>Est. IF</span>
+          <strong id="ifEstimate">0.00</strong>
+        </div>
+      </div>
+
+      <div class="section">
+        <span>Section</span>
+        <strong id="sectionLabel">Not started</strong>
+        <p id="guidanceText">Connect the sidecar, then start the video.</p>
+      </div>
+
+      <div class="section tracklist-section">
+        <span>Tracklist</span>
+        <strong id="trackLabel">Bandcamp Night 2</strong>
+        <p id="trackSourceText">Song bands use the Bandcamp order. Adjust offset if the video has an intro.</p>
+      </div>
+
+      <div class="section analysis-section">
+        <span>Workout analysis</span>
+        <strong id="analysisTitle">Planned workout</strong>
+        <p id="analysisText">Estimated TSS and compliance will update while the ride plays.</p>
+      </div>
+
+      <div class="timeline" id="timeline" aria-label="Concert intensity timeline"></div>
+
+      <div class="event-log" id="eventLog" aria-label="Sidecar event log"></div>
+    </aside>
+  </main>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>

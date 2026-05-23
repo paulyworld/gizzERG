@@ -1,0 +1,317 @@
+# HANDOFF - concert MVP
+
+> Browser-based ERG controller experiment for the YouTube concert ride.
+
+**Last updated:** 2026-05-22
+**Current focus:** Validate whether a manually authored rolling concert profile
+feels good as an ERG workout while reusing the existing sidecar trainer-control
+contract.
+
+## Current Shape
+
+- Static browser app served from `repos/concert-mvp`.
+- YouTube IFrame API provides playback time, pause, resume, and seeking. The
+  app now loads the API from `src/app.js` after registering the callback; do
+  not put a separate `https://www.youtube.com/iframe_api` script tag before the
+  module, because that can race and leave the player blank.
+- `src/erg-controller.js` maps video time + rider FTP/weight to target watts,
+  cadence guidance, and section labels.
+- Workout mode support now exists. `Raw Feel` preserves the music-first manual
+  map. Sports-backed modes call `src/workout-patterns.js` to produce structured
+  workout targets while using the music as a rough guide.
+- `src/concert-profile.js` contains the first manual rolling map for
+  `bnnIdWzGSYI`.
+- The profile also includes Bandcamp-derived Night 2 tracklist metadata for the
+  same video. The source is `Live in Greece '25` on Midnight Gnome People's
+  Bandcamp page, which explicitly lists `bnnIdWzGSYI` as Night 2 and identifies
+  tracks 18-33 as June 5, 2025.
+- Browser talks directly to the sidecar WebSocket with `set_target_power`.
+- Sidecar remains the only trainer I/O layer.
+- A horizontal ride timeline canvas is pinned as an overlay at the bottom of
+  the YouTube player. It spans the video column width, shades each cue/section
+  as a vertical band, shades power and cadence zones horizontally, draws target
+  curves, and fills actual power/cadence samples as the video plays.
+- Video pause uses an app-level soft pause: the browser immediately sends a
+  low easy-spin target instead of waiting for cadence bailout. The sidecar's
+  cadence bailout still owns the low-cadence safety case, including delayed
+  floor drop, queued restore targets, and intensity-aware resume ramps.
+- Browser ERG writes are gated on sidecar state: WebSocket open,
+  `device_capabilities.target_power=true`, and `control_acquired=true`.
+
+## Sidecar Control / Pause Policy
+
+The app and sidecar now have distinct responsibilities:
+
+- **Intentional video pause:** handled in the browser immediately. When the
+  YouTube player transitions from playing to paused/ended, the app computes
+  `controller.pauseTarget(...)` and sends a low target via `set_target_power`.
+  Default is 45% FTP and 75 rpm guidance.
+- **Rider stops pedalling / locked-crank safety:** handled by the sidecar
+  cadence bailout. The sidecar waits based on current intensity, drops to the
+  configured floor, queues any later `set_target_power` as restore intent while
+  bailout is active, and ramps back on cadence resume.
+- **Overlap case:** if the app sends the soft-pause target while sidecar bailout
+  is already active, sidecar replies with
+  `target_power_set accepted=false reason="bailout-pending"`. The app now
+  displays this as "queued by cadence bailout" instead of treating it as a hard
+  rejection.
+
+This means the app no longer relies on cadence bailout to make an intentional
+video pause feel sane. Bailout remains a safety backstop for actual rider
+dropout.
+
+## Trainer-Control State Handling
+
+`src/app.js` tracks:
+
+- `supportsTargetPower` from `device_capabilities.data.target_power`
+- `controlAcquired` from `control_acquired` / `control_released`
+- `targetPowerAck` from `target_power_set`
+
+`sendTargetPower(...)` only writes when:
+
+- WebSocket is open
+- target power is supported
+- trainer control has been acquired
+- video is playing, unless this is the explicit soft-pause write
+
+On `control_acquired`, the app immediately sends the current ride target if the
+video is playing, or the soft-pause target if the video is paused.
+
+## Ride Timeline Chart
+
+The canvas is `#rideChart` in `index.html`, drawn by `drawRideChart()` in
+`src/app.js`.
+
+Current chart behavior:
+
+- Full-width pinned to the bottom of the YouTube player.
+- Vertical background bands now come from `profile.tracks`, offset by the Track
+  offset field. This lets the Bandcamp song order/durations be shifted to
+  account for video intro time before the first song.
+- The bottom song strip includes an explicit `Intro / warmup` segment before
+  Gila Monster. Song segment colors are gradients based on average intensity
+  for that segment and match the chart's green-to-red power palette.
+- The current song segment gets a larger foreground treatment so it remains
+  readable instead of disappearing among narrow neighboring song labels.
+- Target power is drawn as the filled area under the curve. Fill color encodes
+  workout intensity: green for easy, yellow/orange for tempo/threshold, red for
+  hard.
+- Target cadence is overlaid on the same chart as a blue dotted line.
+- Music BPM is overlaid as a separate white dashed line so BPM estimates can be
+  checked against a tapping metronome. The hover tooltip reports the exact
+  music BPM at the inspected timestamp.
+- Actual samples are captured once per second while the video is playing.
+- Actual power samples are drawn as narrow overlays: green only when both power
+  and cadence are maintained; red if either drops below threshold.
+- Hovering over the chart shows the time, section label, target watts/%FTP,
+  target cadence, song title, power zone, cadence zone, and nearest actual
+  sample within five seconds. A gold hover line marks the inspected timestamp.
+- Timeline click-to-seek is available only when the small `seek` checkbox in
+  the chart header is enabled. With it enabled, clicking the chart seeks the
+  YouTube player to the hovered timestamp, updates the external seek slider,
+  resets ERG write throttling, and immediately recalculates the target. With
+  it disabled, chart hover is read-only to avoid accidental jumps during a
+  real ride.
+
+The threshold helper is `targetMaintained(...)` in `src/erg-controller.js`:
+
+- Power maintained: actual power >= 95% of target watts.
+- Cadence maintained: actual cadence >= target cadence - 5 rpm.
+
+This should be mostly green in ERG mode if the trainer is following target.
+The red/green history is intentionally useful for future freeride or shifting
+mode, where the rider must actively hold the target.
+
+## Tracklist Discovery Direction
+
+The current implementation uses a manually captured Bandcamp result for this
+specific YouTube video:
+
+- Source URL: `https://midnightgnomepeople.bandcamp.com/album/live-in-greece-25`
+- The page says Night 2 is `https://www.youtube.com/watch?v=bnnIdWzGSYI`.
+- The page lists tracks 18-33 as June 5, 2025 at Lycabettus Theatre in Athens.
+- Those tracks and durations are stored in `profile.tracks`.
+- The current alignment uses the rider-observed video intro offset:
+  `tracklist_intro_offset_s=833` (13:53). This makes Gila Monster start at
+  13:53 and Motor Spirit start around 18:39. The first 13:53 is treated as
+  generic warmup.
+- `duration_s` is now intro offset plus Bandcamp track durations, currently
+  8753 seconds. Keep this invariant when editing track durations.
+- The original MVP cue map only covered the first hour, which caused the full
+  Bandcamp-length timeline to sit in `Easy spin` after Iron Lung. The current
+  `profile.cues` now spans the full Night 2 duration.
+
+## Warmup Policy
+
+The 0:00-13:53 intro block is an on-bike warmup, not part of the Bandcamp
+tracklist. The current warmup ramps from 45% FTP to about 68% FTP and cadence
+from 78 to 90 rpm before Gila Monster starts. This follows common cycling
+warmup guidance: use 10-20 minutes to progressively build intensity before
+harder work. References checked while making this decision:
+
+- British Cycling describes a progressive 20-minute warm-up and notes that
+  longer rides often use the first 10-20 minutes to build toward intended pace.
+- TrainingPeaks guidance commonly frames warmup as gradually increasing from
+  Z1 toward Z2 over the first 10-15 minutes.
+
+Do not treat the Bandcamp first song as starting at video time 0 unless the
+source video is trimmed.
+
+## BPM vs Cadence
+
+`cue.bpm` now represents observed/estimated music BPM, not ride cadence. Fast
+peaks can legitimately be around 200-220 BPM. The ride target is separately
+stored as `cadence_rpm`, often half-time or otherwise derated to a practical
+cycling target such as 103-110 rpm. The UI readout now says e.g. "206 music BPM,
+ride 103 rpm" to avoid implying the music itself is only 103 BPM.
+
+## Workout Modes / Sports Pattern Library
+
+The app now has a mode selector:
+
+- `Raw Feel`: current concert-first map, preserving the authored intensity and
+  cadence feel.
+- `Aerobic Builder`: full-video endurance/tempo ride with a progressive warmup,
+  mostly endurance/tempo work, and cooldown.
+- `Tempo Intervals`: progressive warmup, repeated tempo/recovery/sweet-spot
+  blocks, and cooldown.
+
+The sports-backed rules live in `src/workout-patterns.js`. They intentionally
+start small:
+
+- A local FTP-zone and cadence-range library.
+- Rules for progressive warmup, endurance/tempo bias on long rides, limited
+  VO2 work, recoveries between work intervals, and cooldown.
+- Source metadata from British Cycling and TrainerRoad.
+
+The structured modes still use music data, but only as a rough modifier. They
+do not blindly follow concert intensity, because concerts are not designed like
+training sessions. Cadence is also mode-shaped: it keeps the music's feel but
+clamps to plausible workout cadence bands.
+
+Warmup is user-selectable with a `Warmup` minutes input. For now this applies
+to the whole-video structured modes. Future smart behavior could choose start
+and stop times based on desired workout duration, track boundaries, and target
+training stimulus.
+
+Current UI note: `Warmup` and `Track offset` are entered as `min:sec` text
+fields, e.g. `13:53`. A plain number is treated as minutes. Units are visible
+for the other settings fields.
+
+Later development candidates:
+
+- Smarter workout templates: endurance, sweet spot, threshold, VO2, recovery,
+  race simulation.
+- Training objective selector and duration selector.
+- Save corrected generated profile.
+- Add distance and climbing estimates once sidecar/engine expose distance and a
+  virtual elevation model.
+
+## TSS / Post-Workout Analysis
+
+`src/workout-analysis.js` estimates planned and actual training load:
+
+- Planned analysis samples `controller.targetAt(time)` across the whole video.
+- Actual analysis uses recorded ride samples captured while the video plays.
+- Weighted power is approximated with a fourth-power mean of sampled watts.
+- Intensity Factor is `weightedPower / FTP`.
+- TSS is estimated as `duration_hours * IF^2 * 100`.
+- Compliance reports maintained percentage, power-maintained percentage,
+  cadence-maintained percentage, and average power/cadence deltas.
+
+This is an MVP approximation, not a full TrainingPeaks-grade NP/TSS
+implementation. A later implementation should use rolling 30-second normalized
+power windows and cleaner pause/excluded-time handling.
+
+The UI shows:
+
+- Live estimated TSS and IF metric tiles.
+- A Workout analysis section that shows planned estimates before riding and
+  current ride estimates/compliance once samples exist.
+
+Future automation should probably be a small resolver script/service rather
+than direct browser scraping. Reasons:
+
+- Bandcamp, Archive.org, and ResListen pages/APIs will have different schemas.
+- Browser-side scraping will often hit CORS limitations.
+- Matching needs confidence scoring because videos may have intro/slate time,
+  crowd noise, missing songs, or edits that shift the audio relative to album
+  durations.
+
+Suggested resolver shape:
+
+1. Input YouTube video id/title/channel/description.
+2. Search Bandcamp, ResListen, and Archive.org for exact video id first.
+3. Fall back to artist + venue/date title matching.
+4. Extract song titles and durations.
+5. Produce `tracks`, `tracklist_source`, and a guessed `tracklist_intro_offset_s`.
+6. Let the rider tune offset in the UI and save the corrected profile.
+
+## Layout Notes
+
+The page is designed to fit a normal laptop viewport without the right-side
+control panel forcing the video down:
+
+- `body` is viewport-locked on desktop.
+- `.shell` is `height: 100vh` with compact padding.
+- `.control-panel` uses internal grid rows and `overflow: hidden`.
+- The vertical cue timeline and event log each scroll inside their own panel
+  regions.
+- On narrower screens, the layout returns to normal document scrolling.
+
+The YouTube embed may still letterbox depending on the source video's aspect
+ratio; that is controlled by the embed/player content rather than page padding.
+
+## Run
+
+```powershell
+cd C:\dev\roguERGlike\repos\sidecar
+$env:PYTHONPATH="src"
+python -m roguerglike_sidecar.cli --mode mock --allow-trainer-control
+```
+
+```powershell
+cd C:\dev\roguERGlike\repos\concert-mvp
+python -m http.server 8430 --bind 127.0.0.1
+```
+
+Open `http://127.0.0.1:8430`.
+
+## Validation
+
+Pure controller tests:
+
+```powershell
+node --test tests\erg-controller.test.mjs
+```
+
+Known PowerShell issue: `npm test` may be blocked by local execution policy
+because it resolves to `npm.ps1`; use the direct Node command above.
+
+Current validation performed:
+
+- `node --test tests\erg-controller.test.mjs` passes: 14/14.
+- `node --check src\app.js` passes.
+- `node --check src\erg-controller.js` passes.
+- `node --check src\concert-profile.js` passes.
+- `node --check src\workout-patterns.js` passes.
+- `node --check src\workout-analysis.js` passes.
+- Static files served successfully from `http://127.0.0.1:8430`.
+- Sidecar WebSocket command path was smoke-tested with the soft-pause target.
+  During an active cadence bailout, sidecar returned:
+
+```json
+{"watts":113,"accepted":false,"reason":"bailout-pending"}
+```
+
+That is expected: the sidecar queued the app's soft-pause target as restore
+intent rather than writing it while bailout was active.
+
+## Open Hardening Notes
+
+- Harden `normalizeProfile` against malformed profile files where every cue has
+  an invalid timestamp. It currently validates that the original cue array is
+  non-empty, filters invalid cue times, then assumes at least one cue remains.
+  This is not a current-profile bug, but should be fixed before loading external
+  or user-authored profiles.
