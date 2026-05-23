@@ -145,6 +145,34 @@
     </aside>
   </main>
 
+  <div id="annotationOverlay" class="annotation-overlay" hidden role="dialog"
+       aria-modal="true" aria-labelledby="annotationTitle">
+    <div class="annotation-card">
+      <h2 id="annotationTitle">Mark this moment</h2>
+      <p class="annotation-hint">
+        Press <kbd>1</kbd>–<kbd>5</kbd> to send a preset tag immediately.
+        Or type a note + tag below, then <kbd>Enter</kbd>.
+        <kbd>Esc</kbd> cancels.
+      </p>
+      <div id="annotationPresets" class="annotation-presets"></div>
+      <label class="annotation-field">
+        <span>Tag</span>
+        <input id="annotationTagInput" type="text" maxlength="64"
+               placeholder="custom tag (e.g. ui-pause)" autocomplete="off">
+      </label>
+      <label class="annotation-field">
+        <span>Note (optional)</span>
+        <input id="annotationNoteInput" type="text" maxlength="280"
+               placeholder="what's happening?" autocomplete="off">
+      </label>
+      <div class="annotation-error" id="annotationError" hidden></div>
+      <div class="annotation-actions">
+        <button id="annotationCancel" type="button">Cancel (Esc)</button>
+        <button id="annotationSubmit" type="button">Send (Enter)</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="src/app.js"></script>
 </body>
 </html>

@@ -2,10 +2,14 @@
 
 > Browser-based ERG controller experiment for the YouTube concert ride.
 
-**Last updated:** 2026-05-22
-**Current focus:** Validate whether a manually authored rolling concert profile
-feels good as an ERG workout while reusing the existing sidecar trainer-control
-contract.
+**Last updated:** 2026-05-23
+**Current branch:** `feat/rider-annotations`
+**Current focus:** F2-keypress annotations primitive shipping in lockstep with the
+sidecar `annotate` command (sidecar PR #22). Rider can mark moments mid-ride
+without breaking pedalling cadence — preset tag hotkeys (1-5) or a small typed
+note. Annotations land in the sidecar JSONL recording alongside telemetry,
+closing the 2026-05-22 debugging gap where three "ui-pause" bailouts were only
+diagnosed post-hoc by eyeball-correlating timestamps.
 
 ## Current Shape
 
@@ -307,6 +311,31 @@ Current validation performed:
 
 That is expected: the sidecar queued the app's soft-pause target as restore
 intent rather than writing it while bailout was active.
+
+## Rider Annotations (F2)
+
+`src/annotations.js` owns the wire contract: tag presets, hotkey mapping,
+`buildAnnotateCommand({tag, note, clientId})` that mirrors the sidecar
+schema bounds (tag 1-64, note ≤280) so client-side mistakes don't have to
+round-trip to discover.
+
+`src/app.js` wires the overlay (markup in `index.html`, styles in
+`styles.css`) and the chart markers:
+
+- **F2** anywhere on the page toggles the overlay. Works regardless of focus.
+- Inside the overlay: digits **1-5** send the preset tag immediately;
+  **Esc** cancels; **Enter** sends the typed tag + note.
+- Sidecar replies with a `rider_annotation` envelope; the app pins the
+  *current video time* at receipt (not WS RTT) so chart markers land at the
+  rider's actual ride position.
+- Markers render as dashed amber verticals + a small triangle at the top of
+  the ride chart. Density is glanceable; precise inspection comes from the
+  JSONL recording.
+
+Wire format matches the sidecar `annotate` command exactly — see
+`repos/sidecar/docs/event-schema.md`. Vocabulary (`ui-pause`, `walk-away`,
+`bug`, `unfair`, `marker`) is pinned to that doc by a test in
+`tests/annotations.test.mjs`.
 
 ## Open Hardening Notes
 
