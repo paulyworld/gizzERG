@@ -1,6 +1,13 @@
-import { CLIENT_ID, TAG_PRESETS, buildAnnotateCommand, presetForHotkey } from "./annotations.js";
+import {
+  CLIENT_ID,
+  TAG_PRESETS,
+  buildAnnotateCommand,
+  buildContextSnapshot,
+  presetForHotkey,
+} from "./annotations.js";
 import { concertProfiles } from "./concert-profile.js";
 import { ErgWorkoutController, formatTime, targetMaintained } from "./erg-controller.js";
+import { routePointAt, sampleTerrainRoute } from "./terrain-model.js";
 import { estimatePlannedWorkout, summarizeCompliance, summarizeRideSamples } from "./workout-analysis.js";
 import { workoutModes } from "./workout-patterns.js";
 
@@ -24,6 +31,24 @@ const els = {
   maxTargetInput: document.querySelector("#maxTargetInput"),
   sidecarUrlInput: document.querySelector("#sidecarUrlInput"),
   trackOffsetInput: document.querySelector("#trackOffsetInput"),
+  terrainGradeScale: document.querySelector("#terrainGradeScale"),
+  terrainGradeScaleOut: document.querySelector("#terrainGradeScaleOut"),
+  terrainBaseline: document.querySelector("#terrainBaseline"),
+  terrainBaselineOut: document.querySelector("#terrainBaselineOut"),
+  terrainMinGrade: document.querySelector("#terrainMinGrade"),
+  terrainMinGradeOut: document.querySelector("#terrainMinGradeOut"),
+  terrainMaxGrade: document.querySelector("#terrainMaxGrade"),
+  terrainMaxGradeOut: document.querySelector("#terrainMaxGradeOut"),
+  terrainSmoothing: document.querySelector("#terrainSmoothing"),
+  terrainSmoothingOut: document.querySelector("#terrainSmoothingOut"),
+  terrainBikeMass: document.querySelector("#terrainBikeMass"),
+  terrainBikeMassOut: document.querySelector("#terrainBikeMassOut"),
+  terrainRollingResistance: document.querySelector("#terrainRollingResistance"),
+  terrainRollingResistanceOut: document.querySelector("#terrainRollingResistanceOut"),
+  terrainDragArea: document.querySelector("#terrainDragArea"),
+  terrainDragAreaOut: document.querySelector("#terrainDragAreaOut"),
+  terrainSummary: document.querySelector("#terrainSummary"),
+  terrainLiveText: document.querySelector("#terrainLiveText"),
   connectButton: document.querySelector("#connectButton"),
   connectionStatus: document.querySelector("#connectionStatus"),
   targetWatts: document.querySelector("#targetWatts"),
@@ -72,6 +97,7 @@ const rideSamples = [];
 // and so the post-ride analysis can correlate them with the telemetry stream.
 const annotations = [];
 let annotationFocusRestore = null;
+let terrainRoute = buildTerrainRoute();
 
 els.profileTitle.textContent = profile.title;
 els.seekSlider.max = String(profile.duration_s);
@@ -88,6 +114,8 @@ for (const mode of workoutModes) {
 renderTimeline();
 renderSongStrip();
 renderTarget(controller.targetAt(0));
+renderTerrainTuning();
+renderTerrainSummary();
 updateAnalysis();
 drawRideChart();
 window.addEventListener("resize", drawRideChart);
@@ -154,6 +182,13 @@ els.trackOffsetInput.addEventListener("input", () => {
   updateAnalysis();
   renderTarget(controller.targetAt(latestVideoTime));
 });
+for (const input of terrainInputs()) {
+  input.addEventListener("input", () => {
+    terrainRoute = buildTerrainRoute();
+    renderTerrainTuning();
+    renderTerrainSummary();
+  });
+}
 
 setInterval(() => tick(false), 500);
 
@@ -398,6 +433,7 @@ function renderTarget(target) {
   els.targetPct.textContent = `${Math.round(target.ftpPct * 100)}%`;
   els.sectionLabel.textContent = target.label;
   els.guidanceText.textContent = `${target.modeLabel}: ${target.musicBpm} music BPM, ride ${target.cadenceRpm} rpm, ${target.wkg.toFixed(2)} W/kg target.`;
+  renderTerrainSummary();
   const track = trackAt(latestVideoTime);
   els.trackLabel.textContent = track
     ? `${track.index + 1}. ${track.title}`
@@ -410,6 +446,90 @@ function renderTarget(target) {
   for (const cueEl of els.timeline.querySelectorAll(".cue")) {
     cueEl.classList.toggle("active", Number(cueEl.dataset.t) === target.cue.t);
   }
+}
+
+function buildTerrainRoute() {
+  return sampleTerrainRoute(profile, terrainOptions());
+}
+
+function terrainOptions() {
+  return {
+    ftp: Number(els.ftpInput?.value) || controller.ftp,
+    riderWeightKg: Number(els.weightInput?.value) || controller.weightKg,
+    gradeScale: Number(els.terrainGradeScale?.value) || 18,
+    baselineIntensity: Number(els.terrainBaseline?.value) || 0.55,
+    minGrade: Number(els.terrainMinGrade?.value) || -2,
+    maxGrade: Number(els.terrainMaxGrade?.value) || 12,
+    smoothingWindowS: Number(els.terrainSmoothing?.value) || 0,
+    bikeWeightKg: Number(els.terrainBikeMass?.value) || 9,
+    rollingResistance: Number(els.terrainRollingResistance?.value) || 0.005,
+    dragArea: Number(els.terrainDragArea?.value) || 0.63,
+  };
+}
+
+function terrainInputs() {
+  return [
+    els.terrainGradeScale,
+    els.terrainBaseline,
+    els.terrainMinGrade,
+    els.terrainMaxGrade,
+    els.terrainSmoothing,
+    els.terrainBikeMass,
+    els.terrainRollingResistance,
+    els.terrainDragArea,
+  ].filter(Boolean);
+}
+
+function renderTerrainTuning() {
+  els.terrainGradeScaleOut.textContent = Number(els.terrainGradeScale.value).toFixed(1);
+  els.terrainBaselineOut.textContent = Number(els.terrainBaseline.value).toFixed(2);
+  els.terrainMinGradeOut.textContent = `${Number(els.terrainMinGrade.value).toFixed(1)}%`;
+  els.terrainMaxGradeOut.textContent = `${Number(els.terrainMaxGrade.value).toFixed(1)}%`;
+  els.terrainSmoothingOut.textContent = `${Math.round(Number(els.terrainSmoothing.value))}s`;
+  els.terrainBikeMassOut.textContent = `${Number(els.terrainBikeMass.value).toFixed(1)}kg`;
+  els.terrainRollingResistanceOut.textContent = Number(els.terrainRollingResistance.value).toFixed(3);
+  els.terrainDragAreaOut.textContent = Number(els.terrainDragArea.value).toFixed(2);
+}
+
+function renderTerrainSummary() {
+  if (!terrainRoute?.samples?.length) {
+    return;
+  }
+  const distanceKm = terrainRoute.distanceM / 1000;
+  const point = routePointAt(terrainRoute, terrainDistanceAtVideoTime(latestVideoTime));
+  els.terrainSummary.textContent = `${distanceKm.toFixed(1)} km / ${Math.round(terrainRoute.elevationGainM)} m`;
+  els.terrainLiveText.textContent = [
+    `Grade ${point.gradePercent.toFixed(1)}%`,
+    `speed ${speedAtVideoTime(latestVideoTime).toFixed(1)} kph`,
+    `route ${formatDistance(point.distanceM)}`,
+  ].join(", ");
+}
+
+function terrainDistanceAtVideoTime(timeS) {
+  if (!terrainRoute?.samples?.length) {
+    return 0;
+  }
+  const sample = terrainRoute.samples.reduce((nearest, next) => (
+    Math.abs(next.timeS - timeS) < Math.abs(nearest.timeS - timeS) ? next : nearest
+  ));
+  return sample.distanceM;
+}
+
+function speedAtVideoTime(timeS) {
+  if (!terrainRoute?.samples?.length) {
+    return 0;
+  }
+  const sample = terrainRoute.samples.reduce((nearest, next) => (
+    Math.abs(next.timeS - timeS) < Math.abs(nearest.timeS - timeS) ? next : nearest
+  ));
+  return sample.speedMps * 3.6;
+}
+
+function formatDistance(meters) {
+  if (meters < 1000) {
+    return `${Math.round(meters)} m`;
+  }
+  return `${(meters / 1000).toFixed(1)} km`;
 }
 
 function updateAnalysis() {
@@ -1006,9 +1126,29 @@ function sendAnnotation(tag, note = "") {
     showAnnotationError("sidecar not connected");
     return;
   }
+  const target = controller.targetAt(latestVideoTime);
+  const context = buildContextSnapshot({
+    profile_id: profile.id,
+    profile_version: profile.version,
+    mode: controller.modeId,
+    video_id: profile.video_id,
+    section: target?.label,
+    target_watts: target?.watts,
+    power: currentPower,
+    cadence: currentCadence,
+    hr: currentHr,
+    wkg: target?.wkg,
+    hardware_source: supportsTargetPower ? "trainer_power" : undefined,
+  });
   let payload;
   try {
-    payload = buildAnnotateCommand({ tag, note: note || null, clientId: CLIENT_ID });
+    payload = buildAnnotateCommand({
+      tag,
+      note: note || null,
+      clientId: CLIENT_ID,
+      clientTimeS: Number.isFinite(latestVideoTime) && latestVideoTime > 0 ? latestVideoTime : null,
+      context,
+    });
   } catch (error) {
     showAnnotationError(error.message);
     return;

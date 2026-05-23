@@ -232,7 +232,7 @@ button:hover {
 
 .control-panel {
   display: grid;
-  grid-template-rows: auto auto auto auto auto auto auto minmax(0, 1fr) minmax(72px, 0.35fr);
+  grid-template-rows: auto auto auto auto auto auto auto auto minmax(0, 1fr) minmax(72px, 0.35fr);
   gap: 9px;
   max-height: calc(100vh - 20px);
   min-height: 0;
@@ -293,6 +293,52 @@ h1 {
   white-space: nowrap;
 }
 
+.terrain-dev-panel {
+  background: #12151a;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 8px;
+}
+
+.terrain-dev-panel summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  user-select: none;
+}
+
+.terrain-tuning-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 10px;
+  margin-top: 8px;
+}
+
+.terrain-tuning-grid label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.terrain-tuning-grid label span {
+  grid-column: 1 / -1;
+}
+
+.terrain-tuning-grid input {
+  width: 100%;
+  min-width: 0;
+}
+
+.terrain-tuning-grid output {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  min-width: 4.5rem;
+  text-align: right;
+}
+
 .connection-row {
   display: flex;
   align-items: center;
@@ -347,6 +393,10 @@ h1 {
 
 .analysis-section strong {
   font-size: 14px;
+}
+
+.terrain-summary-section strong {
+  font-size: 15px;
 }
 
 .timeline {
@@ -427,7 +477,7 @@ h1 {
 
   .control-panel {
     max-height: none;
-    grid-template-rows: auto auto auto auto auto auto auto minmax(180px, 35vh) minmax(90px, 18vh);
+    grid-template-rows: auto auto auto auto auto auto auto auto minmax(180px, 35vh) minmax(90px, 18vh);
   }
 
   .seek,
@@ -442,7 +492,8 @@ h1 {
   }
 
   .settings,
-  .metrics {
+  .metrics,
+  .terrain-tuning-grid {
     grid-template-columns: 1fr;
   }
 }

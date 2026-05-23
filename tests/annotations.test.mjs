@@ -5,12 +5,19 @@ import {
   CLIENT_ID,
   TAG_PRESETS,
   buildAnnotateCommand,
+  buildContextSnapshot,
   presetForHotkey,
 } from "../src/annotations.js";
 
+test("CLIENT_ID is gizzERG", () => {
+  // Repo identity is gizzERG — annotations should report that, not the old
+  // working-directory name.
+  assert.equal(CLIENT_ID, "gizzERG");
+});
+
 test("buildAnnotateCommand minimal payload", () => {
-  const payload = buildAnnotateCommand({ tag: "ui-pause" });
-  assert.deepEqual(payload, { type: "annotate", tag: "ui-pause", client_id: CLIENT_ID });
+  const payload = buildAnnotateCommand({ tag: "too-hard" });
+  assert.deepEqual(payload, { type: "annotate", tag: "too-hard", client_id: CLIENT_ID });
 });
 
 test("buildAnnotateCommand includes note when provided", () => {
@@ -21,9 +28,22 @@ test("buildAnnotateCommand includes note when provided", () => {
   assert.equal(payload.client_id, CLIENT_ID);
 });
 
+test("buildAnnotateCommand includes client_time_s when provided", () => {
+  const payload = buildAnnotateCommand({ tag: "marker", clientTimeS: 2412.5 });
+  assert.equal(payload.client_time_s, 2412.5);
+});
+
+test("buildAnnotateCommand includes context when non-empty", () => {
+  const ctx = { mode: "terrain_erg", grade: 5.5, target_watts: 228 };
+  const payload = buildAnnotateCommand({ tag: "too-hard", context: ctx });
+  assert.deepEqual(payload.context, ctx);
+});
+
 test("buildAnnotateCommand omits empty optional fields", () => {
-  const payload = buildAnnotateCommand({ tag: "marker", note: "" });
+  const payload = buildAnnotateCommand({ tag: "marker", note: "", context: {} });
   assert.equal("note" in payload, false);
+  assert.equal("context" in payload, false);
+  assert.equal("client_time_s" in payload, false);
   assert.equal(payload.client_id, CLIENT_ID);
 });
 
@@ -46,6 +66,18 @@ test("buildAnnotateCommand rejects oversize note", () => {
   assert.throws(() => buildAnnotateCommand({ tag: "bug", note: tooLong }), /exceeds/);
 });
 
+test("buildAnnotateCommand rejects negative client_time_s", () => {
+  assert.throws(
+    () => buildAnnotateCommand({ tag: "marker", clientTimeS: -1 }),
+    /non-negative/,
+  );
+});
+
+test("buildAnnotateCommand rejects non-object context", () => {
+  assert.throws(() => buildAnnotateCommand({ tag: "marker", context: "nope" }), /object/);
+  assert.throws(() => buildAnnotateCommand({ tag: "marker", context: [1, 2] }), /object/);
+});
+
 test("TAG_PRESETS uses unique hotkeys and unique tags", () => {
   const keys = TAG_PRESETS.map((p) => p.key);
   const tags = TAG_PRESETS.map((p) => p.tag);
@@ -53,19 +85,38 @@ test("TAG_PRESETS uses unique hotkeys and unique tags", () => {
   assert.equal(new Set(tags).size, tags.length, "tags must be unique");
 });
 
-test("TAG_PRESETS covers the recommended vocabulary", () => {
-  // The sidecar schema doc recommends ui-pause, walk-away, bug, unfair, marker.
-  // If concert-mvp ever diverges from the vocabulary, the recording analyzer
-  // gets harder to write — this test pins the contract.
+test("TAG_PRESETS biases toward the tuning-feedback vocabulary", () => {
+  // The model-training feedback loop (per engine concert-mode-exploration.md)
+  // wants too-hard / too-easy / bad-sync as the most-reached annotations.
+  // If these slip out of the preset slots, the rider's mid-ride flow gets
+  // worse and the schema-doc vocabulary drifts from the actual UX.
   const tags = TAG_PRESETS.map((p) => p.tag);
-  for (const expected of ["ui-pause", "walk-away", "bug", "unfair", "marker"]) {
+  for (const expected of ["too-hard", "too-easy", "bad-sync", "bug", "marker"]) {
     assert.ok(tags.includes(expected), `expected preset for tag "${expected}"`);
   }
 });
 
 test("presetForHotkey looks up by digit", () => {
-  assert.equal(presetForHotkey("1")?.tag, "ui-pause");
+  assert.equal(presetForHotkey("1")?.tag, "too-hard");
   assert.equal(presetForHotkey("5")?.tag, "marker");
   assert.equal(presetForHotkey("9"), null);
   assert.equal(presetForHotkey(""), null);
+});
+
+test("buildContextSnapshot drops undefined and non-finite values", () => {
+  const snap = buildContextSnapshot({
+    mode: "terrain_erg",
+    grade: 5.5,
+    speed_kph: undefined,
+    distance_m: null,
+    wkg: NaN,
+    target_watts: 228,
+  });
+  assert.deepEqual(snap, { mode: "terrain_erg", grade: 5.5, target_watts: 228 });
+});
+
+test("buildContextSnapshot returns null for empty snapshots", () => {
+  assert.equal(buildContextSnapshot({}), null);
+  assert.equal(buildContextSnapshot(null), null);
+  assert.equal(buildContextSnapshot({ a: undefined, b: null }), null);
 });
