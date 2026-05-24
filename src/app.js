@@ -7,12 +7,28 @@ import {
 } from "./annotations.js";
 import { concertProfiles } from "./concert-profile.js";
 import { ErgWorkoutController, formatTime, targetMaintained } from "./erg-controller.js";
-import { routePointAt, sampleTerrainRoute } from "./terrain-model.js";
+import {
+  DEFAULT_TERRAIN_OPTIONS,
+  estimatePowerForSpeedW,
+  estimateSpeedMps,
+  routePointAt,
+  sampleTerrainRoute,
+} from "./terrain-model.js";
 import { estimatePlannedWorkout, summarizeCompliance, summarizeRideSamples } from "./workout-analysis.js";
 import { workoutModes } from "./workout-patterns.js";
 
 const profile = concertProfiles[0];
 const controller = new ErgWorkoutController(profile);
+const TERRAIN_TUNING_HELP = {
+  terrainGradeScale: "Default 18. Higher values turn the same intensity change into steeper climbs and deeper descents.",
+  terrainBaseline: "Default 0.55. Intensities above this become climbs; intensities below this become descents or flats.",
+  terrainMinGrade: "Default -2%. Caps downhill slope so quiet sections recover without becoming unrealistic descents.",
+  terrainMaxGrade: "Default 12%. Caps the hardest climb generated from intense song sections.",
+  terrainSmoothing: "Default 20s. Higher values delay and soften grade changes so crescendos do not instantly become cliffs.",
+  terrainBikeMass: "Default 9 kg. Heavier bikes reduce modeled speed for the same power, especially uphill.",
+  terrainRollingResistance: "Default 0.005. Higher values slow the route across all grades, like rougher tires or surface.",
+  terrainDragArea: "Default 0.63. Higher values increase aero drag and reduce modeled speed most on fast/flat sections.",
+};
 
 const els = {
   profileTitle: document.querySelector("#profileTitle"),
@@ -47,15 +63,14 @@ const els = {
   terrainRollingResistanceOut: document.querySelector("#terrainRollingResistanceOut"),
   terrainDragArea: document.querySelector("#terrainDragArea"),
   terrainDragAreaOut: document.querySelector("#terrainDragAreaOut"),
+  terrainHelpText: document.querySelector("#terrainHelpText"),
   terrainSummary: document.querySelector("#terrainSummary"),
   terrainLiveText: document.querySelector("#terrainLiveText"),
   connectButton: document.querySelector("#connectButton"),
   connectionStatus: document.querySelector("#connectionStatus"),
-  targetWatts: document.querySelector("#targetWatts"),
-  targetCadence: document.querySelector("#targetCadence"),
+  powerMetric: document.querySelector("#powerMetric"),
+  cadenceMetric: document.querySelector("#cadenceMetric"),
   targetPct: document.querySelector("#targetPct"),
-  livePower: document.querySelector("#livePower"),
-  liveCadence: document.querySelector("#liveCadence"),
   liveHr: document.querySelector("#liveHr"),
   tssEstimate: document.querySelector("#tssEstimate"),
   ifEstimate: document.querySelector("#ifEstimate"),
@@ -187,8 +202,11 @@ for (const input of terrainInputs()) {
     terrainRoute = buildTerrainRoute();
     renderTerrainTuning();
     renderTerrainSummary();
+    drawRideChart();
+    updateAnalysis();
   });
 }
+setupTerrainHelp();
 
 setInterval(() => tick(false), 500);
 
@@ -298,10 +316,11 @@ function handleSidecarEvent(text) {
   }
   if (event.type === "power") {
     currentPower = Math.round(event.data.watts);
-    els.livePower.textContent = `${currentPower} W`;
+    renderPowerCadenceMetric(controller.targetAt(latestVideoTime));
+    renderTerrainSummary();
   } else if (event.type === "cadence") {
     currentCadence = Math.round(event.data.rpm);
-    els.liveCadence.textContent = `${currentCadence} rpm`;
+    renderPowerCadenceMetric(controller.targetAt(latestVideoTime));
   } else if (event.type === "heart_rate") {
     currentHr = Math.round(event.data.bpm);
     els.liveHr.textContent = `${currentHr} bpm`;
@@ -428,8 +447,7 @@ function sendTargetPower(watts, nowMs, { allowWhilePaused = false } = {}) {
 }
 
 function renderTarget(target) {
-  els.targetWatts.textContent = `${target.watts} W`;
-  els.targetCadence.textContent = `${target.cadenceRpm} rpm`;
+  renderPowerCadenceMetric(target);
   els.targetPct.textContent = `${Math.round(target.ftpPct * 100)}%`;
   els.sectionLabel.textContent = target.label;
   els.guidanceText.textContent = `${target.modeLabel}: ${target.musicBpm} music BPM, ride ${target.cadenceRpm} rpm, ${target.wkg.toFixed(2)} W/kg target.`;
@@ -446,6 +464,11 @@ function renderTarget(target) {
   for (const cueEl of els.timeline.querySelectorAll(".cue")) {
     cueEl.classList.toggle("active", Number(cueEl.dataset.t) === target.cue.t);
   }
+}
+
+function renderPowerCadenceMetric(target) {
+  els.powerMetric.textContent = `${currentPower || 0} / ${target.watts} W`;
+  els.cadenceMetric.textContent = `${currentCadence || 0} / ${target.cadenceRpm} rpm`;
 }
 
 function buildTerrainRoute() {
@@ -480,6 +503,38 @@ function terrainInputs() {
   ].filter(Boolean);
 }
 
+function setupTerrainHelp() {
+  for (const input of terrainInputs()) {
+    const help = TERRAIN_TUNING_HELP[input.id];
+    if (!help) {
+      continue;
+    }
+    const label = input.closest("label");
+    const title = label?.querySelector("span");
+    input.title = help;
+    if (title) {
+      title.title = help;
+      title.tabIndex = 0;
+      title.setAttribute("role", "button");
+      title.addEventListener("mouseenter", () => showTerrainHelp(input.id));
+      title.addEventListener("focus", () => showTerrainHelp(input.id));
+      title.addEventListener("click", () => showTerrainHelp(input.id));
+    }
+    input.addEventListener("mouseenter", () => showTerrainHelp(input.id));
+    input.addEventListener("focus", () => showTerrainHelp(input.id));
+    input.addEventListener("click", () => showTerrainHelp(input.id));
+  }
+  showTerrainHelp("terrainGradeScale");
+}
+
+function showTerrainHelp(inputId) {
+  if (!els.terrainHelpText) {
+    return;
+  }
+  els.terrainHelpText.textContent = TERRAIN_TUNING_HELP[inputId]
+    ?? "Adjust route generation and modeled speed defaults for terrain experiments.";
+}
+
 function renderTerrainTuning() {
   els.terrainGradeScaleOut.textContent = Number(els.terrainGradeScale.value).toFixed(1);
   els.terrainBaselineOut.textContent = Number(els.terrainBaseline.value).toFixed(2);
@@ -495,13 +550,17 @@ function renderTerrainSummary() {
   if (!terrainRoute?.samples?.length) {
     return;
   }
-  const distanceKm = terrainRoute.distanceM / 1000;
-  const point = routePointAt(terrainRoute, terrainDistanceAtVideoTime(latestVideoTime));
-  els.terrainSummary.textContent = `${distanceKm.toFixed(1)} km / ${Math.round(terrainRoute.elevationGainM)} m`;
+  const currentDistanceM = terrainDistanceAtVideoTime(latestVideoTime);
+  const point = routePointAt(terrainRoute, currentDistanceM);
+  const speed = terrainSpeedAtVideoTime(latestVideoTime, point);
+  els.terrainSummary.textContent = [
+    `${formatDistance(currentDistanceM)} / ${formatDistance(terrainRoute.distanceM)}`,
+    `+${Math.round(point.elevationGainM ?? 0)} / +${Math.round(terrainRoute.elevationGainM)} m`,
+  ].join(" | ");
   els.terrainLiveText.textContent = [
     `Grade ${point.gradePercent.toFixed(1)}%`,
-    `speed ${speedAtVideoTime(latestVideoTime).toFixed(1)} kph`,
-    `route ${formatDistance(point.distanceM)}`,
+    `elev ${Math.round(point.elevationM)} m`,
+    `${speed.source} ${speed.kph.toFixed(1)} kph`,
   ].join(", ");
 }
 
@@ -515,14 +574,25 @@ function terrainDistanceAtVideoTime(timeS) {
   return sample.distanceM;
 }
 
-function speedAtVideoTime(timeS) {
+function terrainSpeedAtVideoTime(timeS, point = null) {
   if (!terrainRoute?.samples?.length) {
-    return 0;
+    return { kph: 0, source: "modeled speed" };
   }
-  const sample = terrainRoute.samples.reduce((nearest, next) => (
+  if (currentPower > 0) {
+    const routePoint = point ?? routePointAt(terrainRoute, terrainDistanceAtVideoTime(timeS));
+    return {
+      kph: estimateSpeedMps(currentPower, routePoint?.gradePercent ?? 0, terrainOptions()) * 3.6,
+      source: "live-power speed",
+    };
+  }
+  const sample = nearestTerrainSample(timeS);
+  return { kph: sample.speedMps * 3.6, source: "modeled speed" };
+}
+
+function nearestTerrainSample(timeS) {
+  return terrainRoute.samples.reduce((nearest, next) => (
     Math.abs(next.timeS - timeS) < Math.abs(nearest.timeS - timeS) ? next : nearest
   ));
-  return sample.speedMps * 3.6;
 }
 
 function formatDistance(meters) {
@@ -534,9 +604,10 @@ function formatDistance(meters) {
 
 function updateAnalysis() {
   const planned = estimatePlannedWorkout(profile, controller);
+  const terrainPlanned = estimateTerrainAdjustedWorkout();
   const actual = summarizeRideSamples(rideSamples, controller.ftp, rideSamples.length);
   const compliance = summarizeCompliance(rideSamples);
-  const active = rideSamples.length > 0 ? actual : planned;
+  const active = rideSamples.length > 0 ? actual : terrainPlanned;
 
   els.tssEstimate.textContent = String(Math.round(active.tss));
   els.ifEstimate.textContent = active.intensityFactor.toFixed(2);
@@ -546,8 +617,10 @@ function updateAnalysis() {
     els.analysisText.textContent = [
       `TSS ${Math.round(planned.tss)}`,
       `IF ${planned.intensityFactor.toFixed(2)}`,
+      `terrain TSS ${Math.round(terrainPlanned.tss)}`,
+      `terrain IF ${terrainPlanned.intensityFactor.toFixed(2)}`,
       `avg ${Math.round(planned.avgPower)} W`,
-      `weighted ${Math.round(planned.weightedPower)} W`,
+      `terrain weighted ${Math.round(terrainPlanned.weightedPower)} W`,
     ].join(" | ");
     return;
   }
@@ -561,6 +634,57 @@ function updateAnalysis() {
     `cadence ${Math.round(compliance.cadenceMaintainedPct * 100)}%`,
     `avg delta ${Math.round(compliance.avgPowerDelta)} W / ${Math.round(compliance.avgCadenceDelta)} rpm`,
   ].join(" | ");
+}
+
+function estimateTerrainAdjustedWorkout() {
+  if (!terrainRoute?.samples?.length) {
+    return estimatePlannedWorkout(profile, controller);
+  }
+  const opts = terrainOptions();
+  const neutralOptions = {
+    ...DEFAULT_TERRAIN_OPTIONS,
+    ftp: controller.ftp,
+    riderWeightKg: opts.riderWeightKg,
+    bikeWeightKg: DEFAULT_TERRAIN_OPTIONS.bikeWeightKg,
+    rollingResistance: DEFAULT_TERRAIN_OPTIONS.rollingResistance,
+    dragArea: DEFAULT_TERRAIN_OPTIONS.dragArea,
+  };
+  const powerSamples = terrainRoute.samples.map((sample) => {
+    const target = controller.targetAt(sample.timeS);
+    const neutralSpeedMps = estimateSpeedMps(target.watts, 0, neutralOptions);
+    const watts = estimatePowerForSpeedW(neutralSpeedMps, sample.gradePercent, opts);
+    return { time: sample.timeS, watts: Math.max(0, Math.min(2500, watts)) };
+  });
+  return summarizePowerLikeSamples(powerSamples, controller.ftp, profile.duration_s);
+}
+
+function summarizePowerLikeSamples(samples, ftp, durationS) {
+  if (samples.length === 0 || ftp <= 0 || durationS <= 0) {
+    return {
+      durationS,
+      avgPower: 0,
+      weightedPower: 0,
+      intensityFactor: 0,
+      tss: 0,
+      avgFtpPct: 0,
+    };
+  }
+  const avgPower = average(samples.map((sample) => sample.watts));
+  const weightedPower = Math.pow(average(samples.map((sample) => Math.pow(sample.watts, 4))), 0.25);
+  const intensityFactor = weightedPower / ftp;
+  const tss = (durationS / 3600) * intensityFactor * intensityFactor * 100;
+  return {
+    durationS,
+    avgPower,
+    weightedPower,
+    intensityFactor,
+    tss,
+    avgFtpPct: avgPower / ftp,
+  };
+}
+
+function average(values) {
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function drawRideChart() {
@@ -591,30 +715,16 @@ function drawRideChart() {
 
   ctx.fillStyle = "#0f1116";
   ctx.fillRect(0, 0, width, height);
-  drawSongBands(ctx, plotLeft, plotWidth, plotArea.top, plotArea.bottom);
   drawPowerArea(ctx, plotLeft, plotWidth, plotArea, maxPower);
+  drawTerrainProfile(ctx, plotLeft, plotWidth, plotArea);
   drawActualSamples(ctx, plotLeft, plotWidth, plotArea, maxPower);
+  drawTerrainProgress(ctx, plotLeft, plotWidth, plotArea);
   drawCadenceCurve(ctx, plotLeft, plotWidth, plotArea, minCadence, maxCadence);
   drawMusicBpmCurve(ctx, plotLeft, plotWidth, plotArea, minMusicBpm, maxMusicBpm);
   drawPlayhead(ctx, plotLeft, plotWidth, plotArea.top, plotArea.bottom);
   drawHoverLine(ctx, plotLeft, plotWidth, plotArea.top, plotArea.bottom);
   drawAnnotationMarkers(ctx, plotArea, plotLeft, plotWidth);
   drawChartLabels(ctx, width, height, plotArea, maxPower, minCadence, maxCadence, minMusicBpm, maxMusicBpm);
-}
-
-function drawSongBands(ctx, plotLeft, plotWidth, top, bottom) {
-  if (!Array.isArray(profile.tracks) || profile.tracks.length === 0) {
-    return;
-  }
-  for (const track of trackWindows()) {
-    const x = timeToX(track.start_s, plotLeft, plotWidth);
-    const nextX = timeToX(track.end_s, plotLeft, plotWidth);
-    const gradient = ctx.createLinearGradient(x, 0, nextX, 0);
-    gradient.addColorStop(0, powerColor(track.avgFtpPct, 0.20));
-    gradient.addColorStop(1, powerColor(Math.min(1.2, track.avgFtpPct + 0.12), 0.42));
-    ctx.fillStyle = gradient;
-    ctx.fillRect(x, top, Math.max(1, nextX - x), bottom - top);
-  }
 }
 
 function drawPowerArea(ctx, plotLeft, plotWidth, area, maxPower) {
@@ -673,6 +783,75 @@ function drawMusicBpmCurve(ctx, plotLeft, plotWidth, area, minMusicBpm, maxMusic
   ctx.setLineDash([8, 4]);
   ctx.stroke();
   ctx.setLineDash([]);
+}
+
+function drawTerrainProfile(ctx, plotLeft, plotWidth, area) {
+  if (!terrainRoute?.samples?.length) {
+    return;
+  }
+  const samples = terrainRoute.samples;
+  const minElevation = Math.min(0, ...samples.map((sample) => sample.elevationM));
+  const maxElevation = Math.max(1, ...samples.map((sample) => sample.elevationM));
+  const elevationSpan = Math.max(1, maxElevation - minElevation);
+  const profileTop = area.top + (area.bottom - area.top) * 0.34;
+
+  const yForElevation = (elevationM) => (
+    area.bottom - ((elevationM - minElevation) / elevationSpan) * (area.bottom - profileTop)
+  );
+
+  ctx.beginPath();
+  for (const sample of samples) {
+    const x = timeToX(sample.timeS, plotLeft, plotWidth);
+    const y = yForElevation(sample.elevationM);
+    if (sample === samples[0]) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.strokeStyle = "rgba(250, 204, 21, 0.84)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+function drawTerrainProgress(ctx, plotLeft, plotWidth, area) {
+  if (!terrainRoute?.samples?.length) {
+    return;
+  }
+  const samples = terrainRoute.samples.filter((sample) => sample.timeS <= latestVideoTime);
+  if (samples.length < 2) {
+    return;
+  }
+  const allSamples = terrainRoute.samples;
+  const minElevation = Math.min(0, ...allSamples.map((sample) => sample.elevationM));
+  const maxElevation = Math.max(1, ...allSamples.map((sample) => sample.elevationM));
+  const elevationSpan = Math.max(1, maxElevation - minElevation);
+  const profileTop = area.top + (area.bottom - area.top) * 0.34;
+  const yForElevation = (elevationM) => (
+    area.bottom - ((elevationM - minElevation) / elevationSpan) * (area.bottom - profileTop)
+  );
+
+  ctx.beginPath();
+  for (const sample of samples) {
+    const x = timeToX(sample.timeS, plotLeft, plotWidth);
+    const y = yForElevation(sample.elevationM);
+    if (sample === samples[0]) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.96)";
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  const point = routePointAt(terrainRoute, terrainDistanceAtVideoTime(latestVideoTime));
+  const x = timeToX(latestVideoTime, plotLeft, plotWidth);
+  const y = yForElevation(point?.elevationM ?? 0);
+  ctx.fillStyle = "#f2f4f8";
+  ctx.beginPath();
+  ctx.arc(x, y, 4, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 
@@ -784,6 +963,7 @@ function updateRideChartTooltip(event, time) {
   const track = trackAt(time);
   const powerZone = ftpZoneLabel(target.ftpPct);
   const cadenceZone = cadenceZoneLabel(target.cadenceRpm);
+  const terrainPoint = routePointAt(terrainRoute, terrainDistanceAtVideoTime(time));
   const sampleText = nearest
     ? `<span>Actual: ${nearest.power} W, ${nearest.cadence} rpm (${nearest.maintained ? "maintained" : "dropped"})</span>`
     : "<span>Actual: no sample yet</span>";
@@ -794,6 +974,7 @@ function updateRideChartTooltip(event, time) {
     <span>Target: ${target.watts} W (${Math.round(target.ftpPct * 100)}% FTP), ${target.cadenceRpm} rpm</span>
     <span>Mode: ${escapeHtml(target.modeLabel ?? "Workout")}${target.planBlock ? ` / ${escapeHtml(target.planBlock)}` : ""}</span>
     <span>Music BPM: ${target.musicBpm}</span>
+    <span>Terrain: ${terrainPoint.gradePercent.toFixed(1)}%, ${formatDistance(terrainPoint.distanceM)}, ${Math.round(terrainPoint.elevationM)} m elev</span>
     <span>Power zone: ${powerZone}</span>
     <span>Cadence zone: ${cadenceZone}</span>
     ${sampleText}
@@ -903,11 +1084,26 @@ function renderSongStrip() {
     if (latestVideoTime >= track.start_s && latestVideoTime < track.end_s) {
       segment.classList.add("active");
     }
-    segment.textContent = track.title;
+    const label = document.createElement("span");
+    label.className = "song-segment-label";
+    label.textContent = track.title;
+    segment.append(label);
     segment.title = `${formatTime(track.start_s)} - ${formatTime(track.end_s)} ${track.title}`;
-    segment.style.flexBasis = `${Math.max(0.25, (track.duration_s / profile.duration_s) * 100)}%`;
-    segment.style.background = `linear-gradient(90deg, ${powerColor(track.avgFtpPct, 0.92)}, ${powerColor(Math.min(1.2, track.avgFtpPct + 0.12), 0.98)})`;
+    segment.style.flexBasis = `${(track.duration_s / profile.duration_s) * 100}%`;
     els.songStrip.append(segment);
+  }
+  window.requestAnimationFrame(updateSongMarquees);
+}
+
+function updateSongMarquees() {
+  for (const segment of els.songStrip.querySelectorAll(".song-segment")) {
+    const label = segment.querySelector(".song-segment-label");
+    if (!label) {
+      continue;
+    }
+    const distance = Math.max(0, label.scrollWidth - segment.clientWidth + 18);
+    segment.classList.toggle("overflowing", distance > 0);
+    segment.style.setProperty("--marquee-distance", `${distance}px`);
   }
 }
 

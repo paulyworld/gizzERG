@@ -3,13 +3,13 @@
 > Browser-based ERG controller experiment for the YouTube concert ride.
 
 **Last updated:** 2026-05-23
-**Current branch:** `feat/rider-annotations`
-**Current focus:** F2-keypress annotations primitive shipping in lockstep with the
-sidecar `annotate` command (sidecar PR #22). Rider can mark moments mid-ride
-without breaking pedalling cadence — preset tag hotkeys (1-5) or a small typed
-note. Annotations land in the sidecar JSONL recording alongside telemetry,
-closing the 2026-05-22 debugging gap where three "ui-pause" bailouts were only
-diagnosed post-hoc by eyeball-correlating timestamps.
+**Current branch:** `develop`
+**Current focus:** Terrain-dev UI for gizzERG. The app now derives a synthetic
+route from the concert profile, displays current/total distance and climbing,
+draws a net-elevation line on the ride timeline, and lets the rider tune grade,
+rolling resistance, aero drag, and mass from the browser. These controls are
+still a dev/test surface, but they now affect estimated planned terrain TSS
+instead of being display-only.
 
 ## Current Shape
 
@@ -32,9 +32,10 @@ diagnosed post-hoc by eyeball-correlating timestamps.
 - Browser talks directly to the sidecar WebSocket with `set_target_power`.
 - Sidecar remains the only trainer I/O layer.
 - A horizontal ride timeline canvas is pinned as an overlay at the bottom of
-  the YouTube player. It spans the video column width, shades each cue/section
-  as a vertical band, shades power and cadence zones horizontally, draws target
-  curves, and fills actual power/cadence samples as the video plays.
+  the YouTube player. It spans the video column width, draws target power,
+  target cadence, music BPM, actual power/cadence samples, rider annotations,
+  and a line-only net-elevation profile. The song color background was removed
+  because it made the timeline too crowded once terrain was added.
 - Video pause uses an app-level soft pause: the browser immediately sends a
   low easy-spin target instead of waiting for cadence bailout. The sidecar's
   cadence bailout still owns the low-cadence safety case, including delayed
@@ -90,17 +91,22 @@ The canvas is `#rideChart` in `index.html`, drawn by `drawRideChart()` in
 Current chart behavior:
 
 - Full-width pinned to the bottom of the YouTube player.
-- Vertical background bands now come from `profile.tracks`, offset by the Track
-  offset field. This lets the Bandcamp song order/durations be shifted to
-  account for video intro time before the first song.
+- The chart no longer draws song-color background bands. Songs now live in the
+  strip below the canvas so the plot area has fewer overlapping visual layers.
 - The bottom song strip includes an explicit `Intro / warmup` segment before
-  Gila Monster. Song segment colors are gradients based on average intensity
-  for that segment and match the chart's green-to-red power palette.
-- The current song segment gets a larger foreground treatment so it remains
-  readable instead of disappearing among narrow neighboring song labels.
+  Gila Monster. Segment widths are exactly proportional to their timeline
+  duration and aligned to the chart plot area. Long titles stay clipped by
+  default and marquee-scroll only when the segment is active or hovered.
 - Target power is drawn as the filled area under the curve. Fill color encodes
   workout intensity: green for easy, yellow/orange for tempo/threshold, red for
   hard.
+- Terrain is drawn as a line-only net-elevation profile. Descents reduce the
+  line because `sample.elevationM` is net elevation; cumulative positive gain
+  remains available separately as `sample.elevationGainM` and
+  `route.elevationGainM`.
+- Rider progress traces over the net-elevation line with a white progress
+  stroke and marker. The terrain dev readout shows current/total distance and
+  current/total positive gain.
 - Target cadence is overlaid on the same chart as a blue dotted line.
 - Music BPM is overlaid as a separate white dashed line so BPM estimates can be
   checked against a tapping metronome. The hover tooltip reports the exact
@@ -109,8 +115,9 @@ Current chart behavior:
 - Actual power samples are drawn as narrow overlays: green only when both power
   and cadence are maintained; red if either drops below threshold.
 - Hovering over the chart shows the time, section label, target watts/%FTP,
-  target cadence, song title, power zone, cadence zone, and nearest actual
-  sample within five seconds. A gold hover line marks the inspected timestamp.
+  target cadence, song title, terrain grade/distance/elevation, power zone,
+  cadence zone, and nearest actual sample within five seconds. A gold hover
+  line marks the inspected timestamp.
 - Timeline click-to-seek is available only when the small `seek` checkbox in
   the chart header is enabled. With it enabled, clicking the chart seeks the
   YouTube player to the hovered timestamp, updates the external seek slider,
@@ -126,6 +133,36 @@ The threshold helper is `targetMaintained(...)` in `src/erg-controller.js`:
 This should be mostly green in ERG mode if the trainer is following target.
 The red/green history is intentionally useful for future freeride or shifting
 mode, where the rider must actively hold the target.
+
+## Terrain Dev Mode
+
+Terrain is currently generated client-side from the concert profile. The route
+is the same regardless of ERG/manual intent; trainer-control mode decides what
+drives rider feel.
+
+- `src/terrain-model.js` owns the first route model:
+  `sampleTerrainRoute(...)`, `intensityToGrade(...)`,
+  `estimateSpeedMps(...)`, `estimatePowerForSpeedW(...)`, and
+  `routePointAt(...)`.
+- The route keeps net elevation and positive gain separate. `elevationM` is the
+  mountain cross-section line. `elevationGainM` is cumulative climbing for
+  totals/export context.
+- Terrain tuning sliders live in `index.html` / `src/app.js`: grade scale,
+  baseline, min/max grade, smoothing, bike mass, rolling resistance, and aero
+  drag.
+- Slider titles and the help text below the panel explain the current default
+  setpoints and what each control changes.
+- Terrain speed in the dev readout uses live rider power when sidecar power is
+  available. Without sidecar/live power, it reports modeled speed from the
+  generated route.
+- Planned terrain TSS is estimated by asking what power would be required to
+  hold the neutral planned ERG speed over the tuned grade/mass/rolling/aero
+  settings. This is intentionally a dev approximation until sidecar-owned
+  distance/elevation and export semantics land.
+
+Open terrain caveat: sidecar should eventually own ride distance/elevation as
+the recording/export authority once it accepts a terrain profile from the
+client. The browser still owns route design and preview.
 
 ## Tracklist Discovery Direction
 
@@ -209,14 +246,17 @@ Later development candidates:
   race simulation.
 - Training objective selector and duration selector.
 - Save corrected generated profile.
-- Add distance and climbing estimates once sidecar/engine expose distance and a
-  virtual elevation model.
+- Promote the current terrain preview into a sidecar-recorded distance/elevation
+  model once the sidecar accepts route profiles and owns ride progress.
 
 ## TSS / Post-Workout Analysis
 
 `src/workout-analysis.js` estimates planned and actual training load:
 
 - Planned analysis samples `controller.targetAt(time)` across the whole video.
+- Terrain-adjusted planned analysis lives in `src/app.js` for now. It uses the
+  tuned terrain route to estimate the watts required to hold the neutral planned
+  ERG speed over the current grade/mass/rolling/aero settings.
 - Actual analysis uses recorded ride samples captured while the video plays.
 - Weighted power is approximated with a fourth-power mean of sampled watts.
 - Intensity Factor is `weightedPower / FTP`.
@@ -230,9 +270,11 @@ power windows and cleaner pause/excluded-time handling.
 
 The UI shows:
 
-- Live estimated TSS and IF metric tiles.
-- A Workout analysis section that shows planned estimates before riding and
-  current ride estimates/compliance once samples exist.
+- Live estimated TSS and IF metric tiles. Before ride samples exist, these show
+  the terrain-adjusted planned estimate so slider changes affect difficulty.
+- A Workout analysis section that shows original ERG-plan TSS/IF plus
+  terrain-adjusted TSS/IF/weighted power before riding, then current ride
+  estimates/compliance once samples exist.
 
 Future automation should probably be a small resolver script/service rather
 than direct browser scraping. Reasons:
@@ -284,10 +326,10 @@ Open `http://127.0.0.1:8430`.
 
 ## Validation
 
-Pure controller tests:
+Full local test run:
 
 ```powershell
-node --test tests\erg-controller.test.mjs
+node --test tests/*.test.mjs
 ```
 
 Known PowerShell issue: `npm test` may be blocked by local execution policy
@@ -295,13 +337,11 @@ because it resolves to `npm.ps1`; use the direct Node command above.
 
 Current validation performed:
 
-- `node --test tests\erg-controller.test.mjs` passes: 14/14.
+- `node --test tests/*.test.mjs` passes: 38/38.
 - `node --check src\app.js` passes.
-- `node --check src\erg-controller.js` passes.
-- `node --check src\concert-profile.js` passes.
-- `node --check src\workout-patterns.js` passes.
-- `node --check src\workout-analysis.js` passes.
 - Static files served successfully from `http://127.0.0.1:8430`.
+- Headless Chrome loaded `http://127.0.0.1:8430` after the terrain TSS startup
+  regression was fixed.
 - Sidecar WebSocket command path was smoke-tested with the soft-pause target.
   During an active cadence bailout, sidecar returned:
 

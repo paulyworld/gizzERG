@@ -125,6 +125,9 @@
             <output id="terrainDragAreaOut">0.63</output>
           </label>
         </div>
+        <p id="terrainHelpText" class="terrain-help-text">
+          Adjust route generation and modeled speed defaults for terrain experiments.
+        </p>
       </details>
 
       <div class="connection-row">
@@ -134,24 +137,16 @@
 
       <div class="metrics" aria-label="Current targets">
         <div>
-          <span>Target</span>
-          <strong id="targetWatts">0 W</strong>
+          <span>Power live / target</span>
+          <strong id="powerMetric">0 / 0 W</strong>
         </div>
         <div>
-          <span>Cadence</span>
-          <strong id="targetCadence">0 rpm</strong>
+          <span>Cadence live / target</span>
+          <strong id="cadenceMetric">0 / 0 rpm</strong>
         </div>
         <div>
           <span>Intensity</span>
           <strong id="targetPct">0%</strong>
-        </div>
-        <div>
-          <span>Live power</span>
-          <strong id="livePower">0 W</strong>
-        </div>
-        <div>
-          <span>Live cadence</span>
-          <strong id="liveCadence">0 rpm</strong>
         </div>
         <div>
           <span>Heart rate</span>

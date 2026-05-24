@@ -35,6 +35,7 @@ export function sampleTerrainRoute(profile, options = {}) {
   let smoothedIntensity = intensityAt(cues, 0);
   let distanceM = 0;
   let elevationM = 0;
+  let elevationGainM = 0;
 
   for (let timeS = 0; timeS <= durationS; timeS += stepS) {
     const intensity = intensityAt(cues, timeS);
@@ -43,10 +44,12 @@ export function sampleTerrainRoute(profile, options = {}) {
     const powerW = clamp(smoothedIntensity * opts.ftp, 0, 2500);
     const speedMps = estimateSpeedMps(powerW, gradePercent, opts);
     const deltaDistanceM = samples.length === 0 ? 0 : speedMps * stepS;
-    const deltaElevationM = Math.max(0, deltaDistanceM * (gradePercent / 100));
+    const deltaElevationM = deltaDistanceM * (gradePercent / 100);
+    const deltaElevationGainM = Math.max(0, deltaElevationM);
 
     distanceM += deltaDistanceM;
     elevationM += deltaElevationM;
+    elevationGainM += deltaElevationGainM;
 
     samples.push({
       timeS,
@@ -57,8 +60,10 @@ export function sampleTerrainRoute(profile, options = {}) {
       speedMps,
       deltaDistanceM,
       deltaElevationM,
+      deltaElevationGainM,
       distanceM,
       elevationM,
+      elevationGainM,
     });
   }
 
@@ -66,7 +71,7 @@ export function sampleTerrainRoute(profile, options = {}) {
     durationS,
     sampleStepS: stepS,
     distanceM,
-    elevationGainM: elevationM,
+    elevationGainM,
     samples,
   };
 }
@@ -98,6 +103,18 @@ export function estimateSpeedMps(powerW, gradePercent, options = {}) {
   return clamp(lo, 0, opts.maxSpeedMps);
 }
 
+export function estimatePowerForSpeedW(speedMps, gradePercent, options = {}) {
+  const opts = { ...DEFAULT_TERRAIN_OPTIONS, ...options };
+  const massKg = Math.max(1, Number(opts.riderWeightKg) + Number(opts.bikeWeightKg));
+  const speed = Math.max(0, Number(speedMps) || 0);
+  const grade = Number(gradePercent) / 100;
+  const rollingForce = opts.rollingResistance * massKg * G;
+  const gradeForce = massKg * G * grade;
+  const aeroForce = 0.5 * opts.airDensity * opts.dragArea * speed * speed;
+  const wheelPower = Math.max(0, rollingForce + gradeForce + aeroForce) * speed;
+  return wheelPower / opts.drivetrainEfficiency;
+}
+
 export function routePointAt(route, distanceM) {
   if (!route?.samples?.length) {
     return null;
@@ -112,6 +129,7 @@ export function routePointAt(route, distanceM) {
         timeS: lerp(previous.timeS, sample.timeS, t),
         distanceM: target,
         elevationM: lerp(previous.elevationM, sample.elevationM, t),
+        elevationGainM: lerp(previous.elevationGainM, sample.elevationGainM, t),
         gradePercent: lerp(previous.gradePercent, sample.gradePercent, t),
       };
     }
@@ -122,6 +140,7 @@ export function routePointAt(route, distanceM) {
     timeS: last.timeS,
     distanceM: route.distanceM,
     elevationM: last.elevationM,
+    elevationGainM: last.elevationGainM,
     gradePercent: last.gradePercent,
   };
 }

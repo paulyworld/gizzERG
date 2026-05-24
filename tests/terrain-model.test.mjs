@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  estimatePowerForSpeedW,
   estimateSpeedMps,
   intensityToGrade,
   routePointAt,
@@ -30,7 +31,16 @@ test("estimateSpeedMps slows down on steeper grades for the same power", () => {
   assert.ok(climb > 0);
 });
 
-test("sampleTerrainRoute accumulates distance and positive elevation", () => {
+test("estimatePowerForSpeedW increases with grade and drag", () => {
+  const flat = estimatePowerForSpeedW(8, 0, { riderWeightKg: 75 });
+  const climb = estimatePowerForSpeedW(8, 6, { riderWeightKg: 75 });
+  const aero = estimatePowerForSpeedW(8, 0, { riderWeightKg: 75, dragArea: 0.9 });
+
+  assert.ok(climb > flat);
+  assert.ok(aero > flat);
+});
+
+test("sampleTerrainRoute accumulates distance and positive elevation gain", () => {
   const route = sampleTerrainRoute(profile, {
     sampleStepS: 10,
     smoothingWindowS: 0,
@@ -43,6 +53,26 @@ test("sampleTerrainRoute accumulates distance and positive elevation", () => {
   assert.ok(route.distanceM > 0);
   assert.ok(route.elevationGainM > 0);
   assert.equal(route.samples[0].distanceM, 0);
+});
+
+test("sampleTerrainRoute keeps net elevation separate from gain", () => {
+  const route = sampleTerrainRoute({
+    duration_s: 90,
+    cues: [
+      { t: 0, ftp_pct: 1.0 },
+      { t: 30, ftp_pct: 0.35 },
+      { t: 60, ftp_pct: 0.35 },
+    ],
+  }, {
+    sampleStepS: 10,
+    smoothingWindowS: 0,
+    minGrade: -6,
+  });
+  const peak = Math.max(...route.samples.map((sample) => sample.elevationM));
+  const finish = route.samples.at(-1).elevationM;
+
+  assert.ok(peak > finish);
+  assert.ok(route.elevationGainM > Math.max(0, finish));
 });
 
 test("sampleTerrainRoute smooths sudden intensity changes", () => {
