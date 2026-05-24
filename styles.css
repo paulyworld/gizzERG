@@ -137,6 +137,15 @@ button:hover {
   height: 14px;
 }
 
+.terrain-reset-button {
+  width: 100%;
+  min-height: 30px;
+  margin-top: 8px;
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .timeline-seek-enabled #rideChart {
   cursor: pointer;
 }
@@ -152,7 +161,7 @@ button:hover {
   min-height: 34px;
   margin-top: 5px;
   margin-left: 44px;
-  width: calc(100% - 54px);
+  width: calc(100% - 98px);
   overflow: visible;
   border-radius: 5px;
   border: 1px solid rgba(242, 244, 248, 0.18);
@@ -165,7 +174,6 @@ button:hover {
   min-width: 10px;
   padding: 0 7px;
   color: #f8fafc;
-  background: #1b2028;
   font-size: 14px;
   font-weight: 700;
   white-space: nowrap;
@@ -184,6 +192,14 @@ button:hover {
   border: 1px solid rgba(255, 255, 255, 0.72);
   border-radius: 5px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+.song-segment:hover {
+  z-index: 3;
+  transform: translateY(-3px);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 5px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
 }
 
 .song-segment-label {

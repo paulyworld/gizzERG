@@ -26,7 +26,7 @@ export function intensityToGrade(intensity, options = {}) {
 
 export function sampleTerrainRoute(profile, options = {}) {
   const opts = { ...DEFAULT_TERRAIN_OPTIONS, ...options };
-  const cues = normalizeCues(profile);
+  const cues = normalizeCues(profile, opts);
   const durationS = Math.max(Number(profile.duration_s ?? 0), cues.at(-1).t);
   const stepS = Math.max(1, Number(opts.sampleStepS));
   const alpha = stepS / (Math.max(0, Number(opts.smoothingWindowS)) + stepS);
@@ -145,9 +145,13 @@ export function routePointAt(route, distanceM) {
   };
 }
 
-function normalizeCues(profile) {
+function normalizeCues(profile, options = {}) {
   if (!profile || !Array.isArray(profile.cues) || profile.cues.length === 0) {
     throw new Error("terrain profile must include at least one cue");
+  }
+  const derived = normalizeDerivedCurve(profile);
+  if (options.intensitySource !== "cues" && derived.length > 0) {
+    return derived;
   }
   const cues = profile.cues
     .map((cue) => ({
@@ -161,6 +165,20 @@ function normalizeCues(profile) {
     throw new Error("terrain profile must include at least one valid cue");
   }
   return cues;
+}
+
+function normalizeDerivedCurve(profile) {
+  const points = profile?.derived_intensity_curve?.points;
+  if (!Array.isArray(points)) {
+    return [];
+  }
+  return points
+    .map((point) => ({
+      t: Number(point.t),
+      intensity: Number(point.intensity),
+    }))
+    .filter((point) => Number.isFinite(point.t) && Number.isFinite(point.intensity))
+    .sort((a, b) => a.t - b.t);
 }
 
 function intensityAt(cues, timeS) {

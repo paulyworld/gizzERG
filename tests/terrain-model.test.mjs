@@ -75,6 +75,44 @@ test("sampleTerrainRoute keeps net elevation separate from gain", () => {
   assert.ok(route.elevationGainM > Math.max(0, finish));
 });
 
+test("sampleTerrainRoute can use a derived intensity curve", () => {
+  const route = sampleTerrainRoute({
+    duration_s: 30,
+    cues: [
+      { t: 0, ftp_pct: 0.45 },
+      { t: 10, ftp_pct: 0.45 },
+    ],
+    derived_intensity_curve: {
+      model_version: "test",
+      points: [
+        { t: 0, intensity: 1.0 },
+        { t: 10, intensity: 1.0 },
+      ],
+    },
+  }, { sampleStepS: 10, smoothingWindowS: 0 });
+
+  assert.ok(route.samples.find((sample) => sample.timeS === 10).gradePercent > 0);
+});
+
+test("sampleTerrainRoute can force authored cues over derived intensity", () => {
+  const route = sampleTerrainRoute({
+    duration_s: 30,
+    cues: [
+      { t: 0, ftp_pct: 0.45 },
+      { t: 10, ftp_pct: 0.45 },
+    ],
+    derived_intensity_curve: {
+      model_version: "test",
+      points: [
+        { t: 0, intensity: 1.0 },
+        { t: 10, intensity: 1.0 },
+      ],
+    },
+  }, { sampleStepS: 10, smoothingWindowS: 0, intensitySource: "cues" });
+
+  assert.ok(route.samples.find((sample) => sample.timeS === 10).gradePercent < 0);
+});
+
 test("sampleTerrainRoute smooths sudden intensity changes", () => {
   const unsmoothed = sampleTerrainRoute(profile, { sampleStepS: 10, smoothingWindowS: 0 });
   const smoothed = sampleTerrainRoute(profile, { sampleStepS: 10, smoothingWindowS: 60 });

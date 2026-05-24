@@ -25,6 +25,10 @@ instead of being display-only.
   workout targets while using the music as a rough guide.
 - `src/concert-profile.js` contains the first manual rolling map for
   `bnnIdWzGSYI`.
+- The same profile now includes a seeded `derived_intensity_curve` with
+  `model_version`. This seed mirrors authored cue intensity until the audio
+  feature preprocessor lands, but it gives the browser and later tools a real
+  schema to consume.
 - The profile also includes Bandcamp-derived Night 2 tracklist metadata for the
   same video. The source is `Live in Greece '25` on Midnight Gnome People's
   Bandcamp page, which explicitly lists `bnnIdWzGSYI` as Night 2 and identifies
@@ -93,17 +97,27 @@ Current chart behavior:
 - Full-width pinned to the bottom of the YouTube player.
 - The chart no longer draws song-color background bands. Songs now live in the
   strip below the canvas so the plot area has fewer overlapping visual layers.
+- The chart header has a `songs` toggle that draws vertical song-boundary lines
+  behind the power graph when desired.
 - The bottom song strip includes an explicit `Intro / warmup` segment before
   Gila Monster. Segment widths are exactly proportional to their timeline
-  duration and aligned to the chart plot area. Long titles stay clipped by
-  default and marquee-scroll only when the segment is active or hovered.
+  duration and aligned to the chart plot area. Song title tabs use the
+  green-to-red intensity gradient; long titles stay clipped by default and
+  marquee-scroll only when the segment is active or hovered. Hovered segments
+  lift above their neighbors until hover ends.
 - Target power is drawn as the filled area under the curve. Fill color encodes
   workout intensity: green for easy, yellow/orange for tempo/threshold, red for
   hard.
 - Terrain is drawn as a line-only net-elevation profile. Descents reduce the
   line because `sample.elevationM` is net elevation; cumulative positive gain
   remains available separately as `sample.elevationGainM` and
-  `route.elevationGainM`.
+  `route.elevationGainM`. Elevation is scaled against the default route domain
+  instead of auto-normalizing every slider state, so endpoint movement reflects
+  terrain tuning changes. The right side of the chart includes an elevation
+  axis/legend.
+- The seeded derived intensity curve is drawn as a subtle dotted purple line
+  and appears in the hover tooltip. Keep this visually quiet; the chart is
+  already dense.
 - Rider progress traces over the net-elevation line with a white progress
   stroke and marker. The terrain dev readout shows current/total distance and
   current/total positive gain.
@@ -144,6 +158,9 @@ drives rider feel.
   `sampleTerrainRoute(...)`, `intensityToGrade(...)`,
   `estimateSpeedMps(...)`, `estimatePowerForSpeedW(...)`, and
   `routePointAt(...)`.
+- `sampleTerrainRoute(...)` prefers `profile.derived_intensity_curve.points`
+  when present. Pass `intensitySource: "cues"` to force the authored cue map
+  instead; this is covered by tests.
 - The route keeps net elevation and positive gain separate. `elevationM` is the
   mountain cross-section line. `elevationGainM` is cumulative climbing for
   totals/export context.
@@ -152,13 +169,16 @@ drives rider feel.
   drag.
 - Slider titles and the help text below the panel explain the current default
   setpoints and what each control changes.
+- `Reset terrain defaults` returns all terrain sliders to the default setpoints
+  and recomputes the route, chart, and terrain-adjusted TSS.
 - Terrain speed in the dev readout uses live rider power when sidecar power is
   available. Without sidecar/live power, it reports modeled speed from the
   generated route.
-- Planned terrain TSS is estimated by asking what power would be required to
-  hold the neutral planned ERG speed over the tuned grade/mass/rolling/aero
-  settings. This is intentionally a dev approximation until sidecar-owned
-  distance/elevation and export semantics land.
+- Planned terrain TSS uses a bounded terrain difficulty multiplier over the
+  original planned watts. This keeps slider feedback visible without producing
+  impossible multi-thousand TSS rides from raw constant-speed climb physics.
+  This remains a dev approximation until sidecar-owned distance/elevation and
+  export semantics land.
 
 Open terrain caveat: sidecar should eventually own ride distance/elevation as
 the recording/export authority once it accepts a terrain profile from the
@@ -337,8 +357,9 @@ because it resolves to `npm.ps1`; use the direct Node command above.
 
 Current validation performed:
 
-- `node --test tests/*.test.mjs` passes: 38/38.
+- `node --test tests/*.test.mjs` passes: 40/40.
 - `node --check src\app.js` passes.
+- `node --check src\concert-profile.js` passes.
 - Static files served successfully from `http://127.0.0.1:8430`.
 - Headless Chrome loaded `http://127.0.0.1:8430` after the terrain TSS startup
   regression was fixed.
@@ -371,6 +392,12 @@ round-trip to discover.
 - Markers render as dashed amber verticals + a small triangle at the top of
   the ride chart. Density is glanceable; precise inspection comes from the
   JSONL recording.
+- F2 context now includes `profile_id`, `profile_version`,
+  `intensity_model_version`, `mode`, `video_id`, `section`,
+  `estimated_intensity`, target/live power, cadence, HR, W/kg, and
+  `hardware_source` when known. `audio_features` is also included when the
+  derived curve point carries it; the current seed curve does not yet have real
+  audio features.
 
 Wire format matches the sidecar `annotate` command exactly — see
 `repos/sidecar/docs/event-schema.md`. Vocabulary (`ui-pause`, `walk-away`,

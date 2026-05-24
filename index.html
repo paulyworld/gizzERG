@@ -18,6 +18,10 @@
             <i class="legend-good"></i> maintained
             <i class="legend-low"></i> dropped
             <label class="timeline-seek-toggle">
+              <input id="songDivisionsToggle" type="checkbox">
+              songs
+            </label>
+            <label class="timeline-seek-toggle">
               <input id="timelineSeekToggle" type="checkbox">
               seek
             </label>
@@ -125,6 +129,7 @@
             <output id="terrainDragAreaOut">0.63</output>
           </label>
         </div>
+        <button id="resetTerrainTuning" class="terrain-reset-button" type="button">Reset terrain defaults</button>
         <p id="terrainHelpText" class="terrain-help-text">
           Adjust route generation and modeled speed defaults for terrain experiments.
         </p>

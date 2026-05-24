@@ -8,8 +8,6 @@ import {
 import { concertProfiles } from "./concert-profile.js";
 import { ErgWorkoutController, formatTime, targetMaintained } from "./erg-controller.js";
 import {
-  DEFAULT_TERRAIN_OPTIONS,
-  estimatePowerForSpeedW,
   estimateSpeedMps,
   routePointAt,
   sampleTerrainRoute,
@@ -29,6 +27,16 @@ const TERRAIN_TUNING_HELP = {
   terrainRollingResistance: "Default 0.005. Higher values slow the route across all grades, like rougher tires or surface.",
   terrainDragArea: "Default 0.63. Higher values increase aero drag and reduce modeled speed most on fast/flat sections.",
 };
+const DEFAULT_TERRAIN_TUNING = Object.freeze({
+  terrainGradeScale: 18,
+  terrainBaseline: 0.55,
+  terrainMinGrade: -2,
+  terrainMaxGrade: 12,
+  terrainSmoothing: 20,
+  terrainBikeMass: 9,
+  terrainRollingResistance: 0.005,
+  terrainDragArea: 0.63,
+});
 
 const els = {
   profileTitle: document.querySelector("#profileTitle"),
@@ -39,6 +47,7 @@ const els = {
   rideChart: document.querySelector("#rideChart"),
   rideChartTooltip: document.querySelector("#rideChartTooltip"),
   timelineSeekToggle: document.querySelector("#timelineSeekToggle"),
+  songDivisionsToggle: document.querySelector("#songDivisionsToggle"),
   songStrip: document.querySelector("#songStrip"),
   ftpInput: document.querySelector("#ftpInput"),
   workoutModeSelect: document.querySelector("#workoutModeSelect"),
@@ -63,6 +72,7 @@ const els = {
   terrainRollingResistanceOut: document.querySelector("#terrainRollingResistanceOut"),
   terrainDragArea: document.querySelector("#terrainDragArea"),
   terrainDragAreaOut: document.querySelector("#terrainDragAreaOut"),
+  resetTerrainTuning: document.querySelector("#resetTerrainTuning"),
   terrainHelpText: document.querySelector("#terrainHelpText"),
   terrainSummary: document.querySelector("#terrainSummary"),
   terrainLiveText: document.querySelector("#terrainLiveText"),
@@ -140,6 +150,7 @@ els.rideChart.addEventListener("click", onRideChartClick);
 els.timelineSeekToggle.addEventListener("change", () => {
   els.rideChart.parentElement.classList.toggle("timeline-seek-enabled", els.timelineSeekToggle.checked);
 });
+els.songDivisionsToggle.addEventListener("change", drawRideChart);
 loadYouTubeApi()
   .then(createPlayer)
   .catch((error) => {
@@ -206,6 +217,7 @@ for (const input of terrainInputs()) {
     updateAnalysis();
   });
 }
+els.resetTerrainTuning.addEventListener("click", resetTerrainTuning);
 setupTerrainHelp();
 
 setInterval(() => tick(false), 500);
@@ -479,14 +491,29 @@ function terrainOptions() {
   return {
     ftp: Number(els.ftpInput?.value) || controller.ftp,
     riderWeightKg: Number(els.weightInput?.value) || controller.weightKg,
-    gradeScale: Number(els.terrainGradeScale?.value) || 18,
-    baselineIntensity: Number(els.terrainBaseline?.value) || 0.55,
-    minGrade: Number(els.terrainMinGrade?.value) || -2,
-    maxGrade: Number(els.terrainMaxGrade?.value) || 12,
-    smoothingWindowS: Number(els.terrainSmoothing?.value) || 0,
-    bikeWeightKg: Number(els.terrainBikeMass?.value) || 9,
-    rollingResistance: Number(els.terrainRollingResistance?.value) || 0.005,
-    dragArea: Number(els.terrainDragArea?.value) || 0.63,
+    gradeScale: Number(els.terrainGradeScale?.value) || DEFAULT_TERRAIN_TUNING.terrainGradeScale,
+    baselineIntensity: Number(els.terrainBaseline?.value) || DEFAULT_TERRAIN_TUNING.terrainBaseline,
+    minGrade: Number(els.terrainMinGrade?.value) || DEFAULT_TERRAIN_TUNING.terrainMinGrade,
+    maxGrade: Number(els.terrainMaxGrade?.value) || DEFAULT_TERRAIN_TUNING.terrainMaxGrade,
+    smoothingWindowS: Number(els.terrainSmoothing?.value) || DEFAULT_TERRAIN_TUNING.terrainSmoothing,
+    bikeWeightKg: Number(els.terrainBikeMass?.value) || DEFAULT_TERRAIN_TUNING.terrainBikeMass,
+    rollingResistance: Number(els.terrainRollingResistance?.value) || DEFAULT_TERRAIN_TUNING.terrainRollingResistance,
+    dragArea: Number(els.terrainDragArea?.value) || DEFAULT_TERRAIN_TUNING.terrainDragArea,
+  };
+}
+
+function defaultTerrainOptions() {
+  return {
+    ftp: Number(els.ftpInput?.value) || controller.ftp,
+    riderWeightKg: Number(els.weightInput?.value) || controller.weightKg,
+    gradeScale: DEFAULT_TERRAIN_TUNING.terrainGradeScale,
+    baselineIntensity: DEFAULT_TERRAIN_TUNING.terrainBaseline,
+    minGrade: DEFAULT_TERRAIN_TUNING.terrainMinGrade,
+    maxGrade: DEFAULT_TERRAIN_TUNING.terrainMaxGrade,
+    smoothingWindowS: DEFAULT_TERRAIN_TUNING.terrainSmoothing,
+    bikeWeightKg: DEFAULT_TERRAIN_TUNING.terrainBikeMass,
+    rollingResistance: DEFAULT_TERRAIN_TUNING.terrainRollingResistance,
+    dragArea: DEFAULT_TERRAIN_TUNING.terrainDragArea,
   };
 }
 
@@ -533,6 +560,21 @@ function showTerrainHelp(inputId) {
   }
   els.terrainHelpText.textContent = TERRAIN_TUNING_HELP[inputId]
     ?? "Adjust route generation and modeled speed defaults for terrain experiments.";
+}
+
+function resetTerrainTuning() {
+  for (const [id, value] of Object.entries(DEFAULT_TERRAIN_TUNING)) {
+    const input = els[id];
+    if (input) {
+      input.value = String(value);
+    }
+  }
+  terrainRoute = buildTerrainRoute();
+  renderTerrainTuning();
+  renderTerrainSummary();
+  drawRideChart();
+  updateAnalysis();
+  showTerrainHelp("terrainGradeScale");
 }
 
 function renderTerrainTuning() {
@@ -595,6 +637,36 @@ function nearestTerrainSample(timeS) {
   ));
 }
 
+function derivedIntensityPoints() {
+  const points = profile.derived_intensity_curve?.points;
+  if (!Array.isArray(points)) {
+    return [];
+  }
+  return points
+    .map((point) => ({
+      ...point,
+      t: Number(point.t),
+      intensity: Number(point.intensity),
+    }))
+    .filter((point) => Number.isFinite(point.t) && Number.isFinite(point.intensity))
+    .sort((a, b) => a.t - b.t);
+}
+
+function derivedIntensityAt(timeS) {
+  const points = derivedIntensityPoints();
+  if (points.length === 0) {
+    return null;
+  }
+  let current = points[0];
+  for (const point of points) {
+    if (point.t > timeS) {
+      break;
+    }
+    current = point;
+  }
+  return current;
+}
+
 function formatDistance(meters) {
   if (meters < 1000) {
     return `${Math.round(meters)} m`;
@@ -641,21 +713,20 @@ function estimateTerrainAdjustedWorkout() {
     return estimatePlannedWorkout(profile, controller);
   }
   const opts = terrainOptions();
-  const neutralOptions = {
-    ...DEFAULT_TERRAIN_OPTIONS,
-    ftp: controller.ftp,
-    riderWeightKg: opts.riderWeightKg,
-    bikeWeightKg: DEFAULT_TERRAIN_OPTIONS.bikeWeightKg,
-    rollingResistance: DEFAULT_TERRAIN_OPTIONS.rollingResistance,
-    dragArea: DEFAULT_TERRAIN_OPTIONS.dragArea,
-  };
   const powerSamples = terrainRoute.samples.map((sample) => {
     const target = controller.targetAt(sample.timeS);
-    const neutralSpeedMps = estimateSpeedMps(target.watts, 0, neutralOptions);
-    const watts = estimatePowerForSpeedW(neutralSpeedMps, sample.gradePercent, opts);
-    return { time: sample.timeS, watts: Math.max(0, Math.min(2500, watts)) };
+    const watts = target.watts * terrainDifficultyMultiplier(sample, opts);
+    return { time: sample.timeS, watts: Math.max(0, Math.min(target.watts * 1.8, watts)) };
   });
   return summarizePowerLikeSamples(powerSamples, controller.ftp, profile.duration_s);
+}
+
+function terrainDifficultyMultiplier(sample, opts) {
+  const gradeFactor = clamp(1 + Math.max(0, sample.gradePercent) * 0.028 + Math.min(0, sample.gradePercent) * 0.006, 0.92, 1.42);
+  const rollingFactor = clamp(1 + ((opts.rollingResistance / DEFAULT_TERRAIN_TUNING.terrainRollingResistance) - 1) * 0.10, 0.88, 1.18);
+  const aeroFactor = clamp(1 + ((opts.dragArea / DEFAULT_TERRAIN_TUNING.terrainDragArea) - 1) * 0.07, 0.94, 1.10);
+  const massFactor = clamp(1 + ((opts.bikeWeightKg / DEFAULT_TERRAIN_TUNING.terrainBikeMass) - 1) * 0.04, 0.96, 1.06);
+  return clamp(gradeFactor * rollingFactor * aeroFactor * massFactor, 0.82, 1.65);
 }
 
 function summarizePowerLikeSamples(samples, ftp, durationS) {
@@ -687,6 +758,10 @@ function average(values) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, Number(value)));
+}
+
 function drawRideChart() {
   const canvas = els.rideChart;
   const rect = canvas.getBoundingClientRect();
@@ -702,7 +777,7 @@ function drawRideChart() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
 
-  const pad = { left: 44, right: 10, top: 18, bottom: 22 };
+  const pad = { left: 44, right: 54, top: 18, bottom: 22 };
   const plotArea = { top: pad.top, bottom: height - pad.bottom };
   const plotLeft = pad.left;
   const plotRight = width - pad.right;
@@ -715,8 +790,12 @@ function drawRideChart() {
 
   ctx.fillStyle = "#0f1116";
   ctx.fillRect(0, 0, width, height);
+  if (els.songDivisionsToggle.checked) {
+    drawSongDivisionLines(ctx, plotLeft, plotWidth, plotArea.top, plotArea.bottom);
+  }
   drawPowerArea(ctx, plotLeft, plotWidth, plotArea, maxPower);
   drawTerrainProfile(ctx, plotLeft, plotWidth, plotArea);
+  drawDerivedIntensityCurve(ctx, plotLeft, plotWidth, plotArea);
   drawActualSamples(ctx, plotLeft, plotWidth, plotArea, maxPower);
   drawTerrainProgress(ctx, plotLeft, plotWidth, plotArea);
   drawCadenceCurve(ctx, plotLeft, plotWidth, plotArea, minCadence, maxCadence);
@@ -725,6 +804,28 @@ function drawRideChart() {
   drawHoverLine(ctx, plotLeft, plotWidth, plotArea.top, plotArea.bottom);
   drawAnnotationMarkers(ctx, plotArea, plotLeft, plotWidth);
   drawChartLabels(ctx, width, height, plotArea, maxPower, minCadence, maxCadence, minMusicBpm, maxMusicBpm);
+  drawElevationAxis(ctx, plotRight, plotArea);
+}
+
+function drawSongDivisionLines(ctx, plotLeft, plotWidth, top, bottom) {
+  const windows = trackWindows();
+  const boundaries = new Set();
+  for (const track of windows) {
+    boundaries.add(track.start_s);
+    boundaries.add(track.end_s);
+  }
+  for (const boundary of boundaries) {
+    if (boundary <= 0 || boundary >= profile.duration_s) {
+      continue;
+    }
+    const x = timeToX(boundary, plotLeft, plotWidth);
+    ctx.strokeStyle = "rgba(242, 244, 248, 0.24)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, bottom);
+    ctx.stroke();
+  }
 }
 
 function drawPowerArea(ctx, plotLeft, plotWidth, area, maxPower) {
@@ -790,14 +891,7 @@ function drawTerrainProfile(ctx, plotLeft, plotWidth, area) {
     return;
   }
   const samples = terrainRoute.samples;
-  const minElevation = Math.min(0, ...samples.map((sample) => sample.elevationM));
-  const maxElevation = Math.max(1, ...samples.map((sample) => sample.elevationM));
-  const elevationSpan = Math.max(1, maxElevation - minElevation);
-  const profileTop = area.top + (area.bottom - area.top) * 0.34;
-
-  const yForElevation = (elevationM) => (
-    area.bottom - ((elevationM - minElevation) / elevationSpan) * (area.bottom - profileTop)
-  );
+  const yForElevation = elevationToYFactory(area);
 
   ctx.beginPath();
   for (const sample of samples) {
@@ -822,14 +916,7 @@ function drawTerrainProgress(ctx, plotLeft, plotWidth, area) {
   if (samples.length < 2) {
     return;
   }
-  const allSamples = terrainRoute.samples;
-  const minElevation = Math.min(0, ...allSamples.map((sample) => sample.elevationM));
-  const maxElevation = Math.max(1, ...allSamples.map((sample) => sample.elevationM));
-  const elevationSpan = Math.max(1, maxElevation - minElevation);
-  const profileTop = area.top + (area.bottom - area.top) * 0.34;
-  const yForElevation = (elevationM) => (
-    area.bottom - ((elevationM - minElevation) / elevationSpan) * (area.bottom - profileTop)
-  );
+  const yForElevation = elevationToYFactory(area);
 
   ctx.beginPath();
   for (const sample of samples) {
@@ -852,6 +939,83 @@ function drawTerrainProgress(ctx, plotLeft, plotWidth, area) {
   ctx.beginPath();
   ctx.arc(x, y, 4, 0, Math.PI * 2);
   ctx.fill();
+}
+
+function drawElevationAxis(ctx, plotRight, area) {
+  const domain = terrainElevationDomain();
+  const yForElevation = elevationToYFactory(area);
+  const ticks = [domain.max, Math.round((domain.max + domain.min) / 2), domain.min];
+  ctx.strokeStyle = "rgba(250, 204, 21, 0.36)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(plotRight + 8, area.top);
+  ctx.lineTo(plotRight + 8, area.bottom);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(250, 204, 21, 0.90)";
+  ctx.font = "10px system-ui, sans-serif";
+  for (const tick of ticks) {
+    const y = yForElevation(tick);
+    ctx.strokeStyle = "rgba(250, 204, 21, 0.30)";
+    ctx.beginPath();
+    ctx.moveTo(plotRight + 5, y);
+    ctx.lineTo(plotRight + 11, y);
+    ctx.stroke();
+    ctx.fillText(`${Math.round(tick)}m`, plotRight + 14, y + 3);
+  }
+}
+
+function elevationToYFactory(area) {
+  const domain = terrainElevationDomain();
+  const elevationSpan = Math.max(1, domain.max - domain.min);
+  const profileTop = area.top + (area.bottom - area.top) * 0.18;
+  return (elevationM) => (
+    area.bottom - ((elevationM - domain.min) / elevationSpan) * (area.bottom - profileTop)
+  );
+}
+
+function terrainElevationDomain() {
+  const defaultRoute = sampleTerrainRoute(profile, defaultTerrainOptions());
+  const defaultElevations = defaultRoute.samples.map((sample) => sample.elevationM);
+  const currentElevations = terrainRoute?.samples?.map((sample) => sample.elevationM) ?? [0];
+  const defaultMin = Math.min(0, ...defaultElevations);
+  const defaultMax = Math.max(1, ...defaultElevations);
+  let min = Math.min(defaultMin, 0);
+  let max = Math.max(defaultMax, 1);
+  const currentMin = Math.min(...currentElevations);
+  const currentMax = Math.max(...currentElevations);
+  if (currentMin < min) {
+    min = currentMin;
+  }
+  if (currentMax > max * 1.35) {
+    max = currentMax;
+  }
+  const padding = Math.max(10, (max - min) * 0.08);
+  return {
+    min: Math.floor(min - padding),
+    max: Math.ceil(max + padding),
+  };
+}
+
+function drawDerivedIntensityCurve(ctx, plotLeft, plotWidth, area) {
+  const points = derivedIntensityPoints();
+  if (points.length < 2) {
+    return;
+  }
+  ctx.beginPath();
+  for (const point of points) {
+    const x = timeToX(point.t, plotLeft, plotWidth);
+    const y = area.bottom - Math.max(0, Math.min(1.25, point.intensity)) / 1.25 * (area.bottom - area.top);
+    if (point === points[0]) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.strokeStyle = "rgba(216, 180, 254, 0.72)";
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([2, 6]);
+  ctx.stroke();
+  ctx.setLineDash([]);
 }
 
 
@@ -901,6 +1065,8 @@ function drawChartLabels(ctx, width, height, area, maxPower, minCadence, maxCade
   ctx.fillText(`${minCadence}-${maxCadence} rpm`, 4, area.top + 46);
   ctx.fillStyle = "rgba(250, 250, 250, 0.90)";
   ctx.fillText(`${minMusicBpm}-${maxMusicBpm} BPM`, 4, area.top + 62);
+  ctx.fillStyle = "rgba(216, 180, 254, 0.90)";
+  ctx.fillText("Derived", 7, area.top + 78);
   ctx.fillText(formatTime(0), 44, height - 5);
   const endText = formatTime(profile.duration_s);
   ctx.fillText(endText, width - 10 - ctx.measureText(endText).width, height - 5);
@@ -964,6 +1130,7 @@ function updateRideChartTooltip(event, time) {
   const powerZone = ftpZoneLabel(target.ftpPct);
   const cadenceZone = cadenceZoneLabel(target.cadenceRpm);
   const terrainPoint = routePointAt(terrainRoute, terrainDistanceAtVideoTime(time));
+  const derived = derivedIntensityAt(time);
   const sampleText = nearest
     ? `<span>Actual: ${nearest.power} W, ${nearest.cadence} rpm (${nearest.maintained ? "maintained" : "dropped"})</span>`
     : "<span>Actual: no sample yet</span>";
@@ -974,6 +1141,7 @@ function updateRideChartTooltip(event, time) {
     <span>Target: ${target.watts} W (${Math.round(target.ftpPct * 100)}% FTP), ${target.cadenceRpm} rpm</span>
     <span>Mode: ${escapeHtml(target.modeLabel ?? "Workout")}${target.planBlock ? ` / ${escapeHtml(target.planBlock)}` : ""}</span>
     <span>Music BPM: ${target.musicBpm}</span>
+    <span>Derived intensity: ${derived ? `${Math.round(derived.intensity * 100)}%` : "not available"}</span>
     <span>Terrain: ${terrainPoint.gradePercent.toFixed(1)}%, ${formatDistance(terrainPoint.distanceM)}, ${Math.round(terrainPoint.elevationM)} m elev</span>
     <span>Power zone: ${powerZone}</span>
     <span>Cadence zone: ${cadenceZone}</span>
@@ -1090,6 +1258,7 @@ function renderSongStrip() {
     segment.append(label);
     segment.title = `${formatTime(track.start_s)} - ${formatTime(track.end_s)} ${track.title}`;
     segment.style.flexBasis = `${(track.duration_s / profile.duration_s) * 100}%`;
+    segment.style.background = `linear-gradient(90deg, ${powerColor(track.avgFtpPct, 0.94)}, ${powerColor(Math.min(1.2, track.avgFtpPct + 0.12), 0.98)})`;
     els.songStrip.append(segment);
   }
   window.requestAnimationFrame(updateSongMarquees);
@@ -1323,12 +1492,16 @@ function sendAnnotation(tag, note = "") {
     return;
   }
   const target = controller.targetAt(latestVideoTime);
+  const derived = derivedIntensityAt(latestVideoTime);
   const context = buildContextSnapshot({
     profile_id: profile.id,
     profile_version: profile.version,
+    intensity_model_version: profile.derived_intensity_curve?.model_version,
     mode: controller.modeId,
     video_id: profile.video_id,
     section: target?.label,
+    estimated_intensity: derived?.intensity,
+    audio_features: derived?.audio_features,
     target_watts: target?.watts,
     power: currentPower,
     cadence: currentCadence,
