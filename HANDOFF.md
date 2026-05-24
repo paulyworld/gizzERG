@@ -161,6 +161,12 @@ drives rider feel.
 - `sampleTerrainRoute(...)` prefers `profile.derived_intensity_curve.points`
   when present. Pass `intensitySource: "cues"` to force the authored cue map
   instead; this is covered by tests.
+- The terrain panel now exposes that choice directly with a `Terrain source`
+  selector: `Derived intensity` or `Authored cues`.
+- `Sample step` controls route sampling cadence. Default is 5 seconds. Lower
+  values are intended for manual-shift terrain and future audio-derived curves
+  where grade should respond to musical changes more tightly than the current
+  sparse authored cue map.
 - The route keeps net elevation and positive gain separate. `elevationM` is the
   mountain cross-section line. `elevationGainM` is cumulative climbing for
   totals/export context.
@@ -183,6 +189,23 @@ drives rider feel.
 Open terrain caveat: sidecar should eventually own ride distance/elevation as
 the recording/export authority once it accepts a terrain profile from the
 client. The browser still owns route design and preview.
+
+## Profile Builder / Audio Features
+
+`tools/profile-builder/` is a dependency-free scaffold for the future audio
+feature pipeline. It does not download or analyze audio yet; it normalizes
+precomputed feature points into a `derived_intensity_curve` object shaped for
+the browser.
+
+- `build_profile.py` accepts feature JSON with points carrying `t`, `loudness`,
+  `spectral_centroid`, `onset_density`, and `harmonic_ratio`.
+- It writes `model_version`, `sample_step_s`, model weights, derived
+  `intensity`, and per-point `audio_features`.
+- Current weights are loudness 0.40, spectral centroid 0.20, onset density
+  0.30, and percussive ratio 0.10.
+- Recommended next implementation pass is to add `yt-dlp`/`librosa` extraction
+  ahead of this normalization step, then generate 1-5 second sample curves for
+  manual shifting terrain.
 
 ## Tracklist Discovery Direction
 

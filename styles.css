@@ -351,6 +351,7 @@ h1 {
   user-select: none;
 }
 
+.terrain-source-grid,
 .terrain-tuning-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -358,6 +359,7 @@ h1 {
   margin-top: 8px;
 }
 
+.terrain-source-grid label,
 .terrain-tuning-grid label {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -366,15 +368,29 @@ h1 {
   font-size: 12px;
 }
 
+.terrain-source-grid label span,
 .terrain-tuning-grid label span {
   grid-column: 1 / -1;
 }
 
+.terrain-source-grid input,
+.terrain-source-grid select,
 .terrain-tuning-grid input {
   width: 100%;
   min-width: 0;
 }
 
+.terrain-source-grid select {
+  grid-column: 1 / -1;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #111318;
+  color: var(--text);
+  min-height: 30px;
+  padding: 4px 7px;
+}
+
+.terrain-source-grid output,
 .terrain-tuning-grid output {
   color: var(--text);
   font-variant-numeric: tabular-nums;

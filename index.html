@@ -87,6 +87,20 @@
 
       <details class="terrain-dev-panel" id="terrainDevPanel">
         <summary>Terrain tuning</summary>
+        <div class="terrain-source-grid">
+          <label>
+            <span>Terrain source</span>
+            <select id="terrainSourceSelect">
+              <option value="derived">Derived intensity</option>
+              <option value="cues">Authored cues</option>
+            </select>
+          </label>
+          <label>
+            <span>Sample step</span>
+            <input id="terrainSampleStep" type="range" min="1" max="30" step="1" value="5">
+            <output id="terrainSampleStepOut">5s</output>
+          </label>
+        </div>
         <div class="terrain-tuning-grid">
           <label>
             <span>Grade scale</span>

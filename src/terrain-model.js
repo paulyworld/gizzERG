@@ -150,7 +150,7 @@ function normalizeCues(profile, options = {}) {
     throw new Error("terrain profile must include at least one cue");
   }
   const derived = normalizeDerivedCurve(profile);
-  if (options.intensitySource !== "cues" && derived.length > 0) {
+  if (options.intensitySource === "derived" && derived.length > 0) {
     return derived;
   }
   const cues = profile.cues

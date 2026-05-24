@@ -89,7 +89,7 @@ test("sampleTerrainRoute can use a derived intensity curve", () => {
         { t: 10, intensity: 1.0 },
       ],
     },
-  }, { sampleStepS: 10, smoothingWindowS: 0 });
+  }, { sampleStepS: 10, smoothingWindowS: 0, intensitySource: "derived" });
 
   assert.ok(route.samples.find((sample) => sample.timeS === 10).gradePercent > 0);
 });

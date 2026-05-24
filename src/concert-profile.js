@@ -14,6 +14,7 @@ export const concertProfiles = [
     derived_intensity_curve: {
       model_version: "manual-seed-v0.1",
       source: "authored-cue-seed",
+      sample_step_s: null,
       note: "Seed curve mirrors the authored cue map until the audio-feature builder lands.",
       points: [
         { t: 0, intensity: 0.45 },

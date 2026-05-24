@@ -18,6 +18,8 @@ import { workoutModes } from "./workout-patterns.js";
 const profile = concertProfiles[0];
 const controller = new ErgWorkoutController(profile);
 const TERRAIN_TUNING_HELP = {
+  terrainSourceSelect: "Derived intensity uses profile.derived_intensity_curve when present; authored cues uses the manual FTP cue map.",
+  terrainSampleStep: "Default 5s. Lower values sample the route more often, which will matter once audio-derived curves mark fast musical changes.",
   terrainGradeScale: "Default 18. Higher values turn the same intensity change into steeper climbs and deeper descents.",
   terrainBaseline: "Default 0.55. Intensities above this become climbs; intensities below this become descents or flats.",
   terrainMinGrade: "Default -2%. Caps downhill slope so quiet sections recover without becoming unrealistic descents.",
@@ -28,6 +30,8 @@ const TERRAIN_TUNING_HELP = {
   terrainDragArea: "Default 0.63. Higher values increase aero drag and reduce modeled speed most on fast/flat sections.",
 };
 const DEFAULT_TERRAIN_TUNING = Object.freeze({
+  terrainSourceSelect: "derived",
+  terrainSampleStep: 5,
   terrainGradeScale: 18,
   terrainBaseline: 0.55,
   terrainMinGrade: -2,
@@ -56,6 +60,9 @@ const els = {
   maxTargetInput: document.querySelector("#maxTargetInput"),
   sidecarUrlInput: document.querySelector("#sidecarUrlInput"),
   trackOffsetInput: document.querySelector("#trackOffsetInput"),
+  terrainSourceSelect: document.querySelector("#terrainSourceSelect"),
+  terrainSampleStep: document.querySelector("#terrainSampleStep"),
+  terrainSampleStepOut: document.querySelector("#terrainSampleStepOut"),
   terrainGradeScale: document.querySelector("#terrainGradeScale"),
   terrainGradeScaleOut: document.querySelector("#terrainGradeScaleOut"),
   terrainBaseline: document.querySelector("#terrainBaseline"),
@@ -491,6 +498,8 @@ function terrainOptions() {
   return {
     ftp: Number(els.ftpInput?.value) || controller.ftp,
     riderWeightKg: Number(els.weightInput?.value) || controller.weightKg,
+    sampleStepS: Number(els.terrainSampleStep?.value) || DEFAULT_TERRAIN_TUNING.terrainSampleStep,
+    intensitySource: els.terrainSourceSelect?.value === "cues" ? "cues" : "derived",
     gradeScale: Number(els.terrainGradeScale?.value) || DEFAULT_TERRAIN_TUNING.terrainGradeScale,
     baselineIntensity: Number(els.terrainBaseline?.value) || DEFAULT_TERRAIN_TUNING.terrainBaseline,
     minGrade: Number(els.terrainMinGrade?.value) || DEFAULT_TERRAIN_TUNING.terrainMinGrade,
@@ -506,6 +515,8 @@ function defaultTerrainOptions() {
   return {
     ftp: Number(els.ftpInput?.value) || controller.ftp,
     riderWeightKg: Number(els.weightInput?.value) || controller.weightKg,
+    sampleStepS: DEFAULT_TERRAIN_TUNING.terrainSampleStep,
+    intensitySource: DEFAULT_TERRAIN_TUNING.terrainSourceSelect,
     gradeScale: DEFAULT_TERRAIN_TUNING.terrainGradeScale,
     baselineIntensity: DEFAULT_TERRAIN_TUNING.terrainBaseline,
     minGrade: DEFAULT_TERRAIN_TUNING.terrainMinGrade,
@@ -519,6 +530,8 @@ function defaultTerrainOptions() {
 
 function terrainInputs() {
   return [
+    els.terrainSourceSelect,
+    els.terrainSampleStep,
     els.terrainGradeScale,
     els.terrainBaseline,
     els.terrainMinGrade,
@@ -578,6 +591,7 @@ function resetTerrainTuning() {
 }
 
 function renderTerrainTuning() {
+  els.terrainSampleStepOut.textContent = `${Math.round(Number(els.terrainSampleStep.value))}s`;
   els.terrainGradeScaleOut.textContent = Number(els.terrainGradeScale.value).toFixed(1);
   els.terrainBaselineOut.textContent = Number(els.terrainBaseline.value).toFixed(2);
   els.terrainMinGradeOut.textContent = `${Number(els.terrainMinGrade.value).toFixed(1)}%`;
@@ -600,10 +614,15 @@ function renderTerrainSummary() {
     `+${Math.round(point.elevationGainM ?? 0)} / +${Math.round(terrainRoute.elevationGainM)} m`,
   ].join(" | ");
   els.terrainLiveText.textContent = [
+    `${terrainSourceLabel()} @ ${terrainRoute.sampleStepS}s`,
     `Grade ${point.gradePercent.toFixed(1)}%`,
     `elev ${Math.round(point.elevationM)} m`,
     `${speed.source} ${speed.kph.toFixed(1)} kph`,
   ].join(", ");
+}
+
+function terrainSourceLabel() {
+  return els.terrainSourceSelect?.value === "cues" ? "authored cues" : "derived intensity";
 }
 
 function terrainDistanceAtVideoTime(timeS) {
