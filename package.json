@@ -2,6 +2,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/erg-controller.test.mjs"
+    "test": "node --test tests/*.test.mjs"
   }
 }

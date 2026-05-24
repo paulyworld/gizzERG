@@ -81,6 +81,52 @@
         </label>
       </div>
 
+      <details class="terrain-dev-panel" id="terrainDevPanel">
+        <summary>Terrain tuning</summary>
+        <div class="terrain-tuning-grid">
+          <label>
+            <span>Grade scale</span>
+            <input id="terrainGradeScale" type="range" min="4" max="30" step="0.5" value="18">
+            <output id="terrainGradeScaleOut">18.0</output>
+          </label>
+          <label>
+            <span>Baseline</span>
+            <input id="terrainBaseline" type="range" min="0.25" max="0.85" step="0.01" value="0.55">
+            <output id="terrainBaselineOut">0.55</output>
+          </label>
+          <label>
+            <span>Min grade</span>
+            <input id="terrainMinGrade" type="range" min="-8" max="2" step="0.5" value="-2">
+            <output id="terrainMinGradeOut">-2.0%</output>
+          </label>
+          <label>
+            <span>Max grade</span>
+            <input id="terrainMaxGrade" type="range" min="3" max="20" step="0.5" value="12">
+            <output id="terrainMaxGradeOut">12.0%</output>
+          </label>
+          <label>
+            <span>Smoothing</span>
+            <input id="terrainSmoothing" type="range" min="0" max="90" step="5" value="20">
+            <output id="terrainSmoothingOut">20s</output>
+          </label>
+          <label>
+            <span>Bike mass</span>
+            <input id="terrainBikeMass" type="range" min="6" max="18" step="0.5" value="9">
+            <output id="terrainBikeMassOut">9.0kg</output>
+          </label>
+          <label>
+            <span>Rolling</span>
+            <input id="terrainRollingResistance" type="range" min="0.002" max="0.012" step="0.001" value="0.005">
+            <output id="terrainRollingResistanceOut">0.005</output>
+          </label>
+          <label>
+            <span>Aero</span>
+            <input id="terrainDragArea" type="range" min="0.35" max="0.9" step="0.01" value="0.63">
+            <output id="terrainDragAreaOut">0.63</output>
+          </label>
+        </div>
+      </details>
+
       <div class="connection-row">
         <button id="connectButton" type="button">Connect Sidecar</button>
         <span id="connectionStatus">disconnected</span>
@@ -121,6 +167,12 @@
         </div>
       </div>
 
+      <div class="section terrain-summary-section">
+        <span>Terrain dev</span>
+        <strong id="terrainSummary">0.0 km / 0 m</strong>
+        <p id="terrainLiveText">Grade 0.0%, speed 0.0 kph, route point 0.0 km.</p>
+      </div>
+
       <div class="section">
         <span>Section</span>
         <strong id="sectionLabel">Not started</strong>
@@ -144,6 +196,34 @@
       <div class="event-log" id="eventLog" aria-label="Sidecar event log"></div>
     </aside>
   </main>
+
+  <div id="annotationOverlay" class="annotation-overlay" hidden role="dialog"
+       aria-modal="true" aria-labelledby="annotationTitle">
+    <div class="annotation-card">
+      <h2 id="annotationTitle">Mark this moment</h2>
+      <p class="annotation-hint">
+        Press <kbd>1</kbd>–<kbd>5</kbd> to send a preset tag immediately.
+        Or type a note + tag below, then <kbd>Enter</kbd>.
+        <kbd>Esc</kbd> cancels.
+      </p>
+      <div id="annotationPresets" class="annotation-presets"></div>
+      <label class="annotation-field">
+        <span>Tag</span>
+        <input id="annotationTagInput" type="text" maxlength="64"
+               placeholder="custom tag (e.g. ui-pause)" autocomplete="off">
+      </label>
+      <label class="annotation-field">
+        <span>Note (optional)</span>
+        <input id="annotationNoteInput" type="text" maxlength="280"
+               placeholder="what's happening?" autocomplete="off">
+      </label>
+      <div class="annotation-error" id="annotationError" hidden></div>
+      <div class="annotation-actions">
+        <button id="annotationCancel" type="button">Cancel (Esc)</button>
+        <button id="annotationSubmit" type="button">Send (Enter)</button>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="src/app.js"></script>
 </body>
