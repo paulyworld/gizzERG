@@ -211,6 +211,45 @@ features from a local audio file with `librosa`.
   tuning so the download can be reused.
 - Dependencies are in `tools/profile-builder/requirements.txt`.
 
+### Claude handoff — yt-dlp + librosa validation
+
+Codex added the implementation but has **not** run a live YouTube download yet.
+Local validation completed:
+
+- `python -m pip install -r tools\profile-builder\requirements.txt`
+  succeeded on this machine.
+- `python -m unittest discover tools\profile-builder\tests` passes: 6/6.
+- `python -m py_compile tools\profile-builder\build_profile.py` passes.
+- `node --test tests/*.test.mjs` passes: 44/44.
+- Synthetic WAV smoke test succeeded:
+  `python tools\profile-builder\build_profile.py --audio C:\tmp\gizzerg-smoke.wav --out C:\tmp\gizzerg-smoke-curve.json --sample-step-s 1`
+  produced an `audio-features-librosa-v0.1` curve with dense points.
+
+Next validation for Claude:
+
+```powershell
+cd C:\dev\roguERGlike\repos\concert-mvp
+python tools\profile-builder\build_profile.py `
+  --youtube-url "https://www.youtube.com/watch?v=bnnIdWzGSYI" `
+  --out C:\tmp\bnnIdWzGSYI.audio-features-librosa-v0.1.json `
+  --sample-step-s 2 `
+  --work-dir C:\tmp\gizzerg-profile-audio `
+  --keep-audio
+```
+
+Review the generated JSON before replacing the profile seed:
+
+- Confirm duration/point count roughly matches the YouTube video length.
+- Confirm `model_version` is `audio-features-librosa-v0.1`.
+- Check min/median/max intensity and a handful of high-intensity timestamps.
+- Compare peaks against obvious musical peaks and the 13:53 tracklist intro
+  offset.
+- Do **not** paste into `src/concert-profile.js` until the curve looks sane.
+
+Recommended follow-up if the curve is hard to inspect: add a tiny summary mode
+to `build_profile.py` or a separate script that prints duration, sample step,
+min/median/max intensity, and top peak timestamps.
+
 ## Tracklist Discovery Direction
 
 The current implementation uses a manually captured Bandcamp result for this
