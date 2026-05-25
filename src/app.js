@@ -8,6 +8,7 @@ import {
 import { concertProfiles } from "./concert-profile.js";
 import { ErgWorkoutController, formatTime, targetMaintained } from "./erg-controller.js";
 import {
+  blendTerrainIntensityAt,
   estimateSpeedMps,
   routePointAt,
   sampleTerrainRoute,
@@ -639,6 +640,16 @@ function terrainSourceLabel() {
   return "derived intensity";
 }
 
+function terrainSourceDisplayLabel() {
+  if (terrainSourceValue() === "cues") {
+    return "Authored cues";
+  }
+  if (terrainSourceValue() === "blended") {
+    return `Blended (${Math.round(Number(els.terrainBlend?.value || 0) * 100)}% derived)`;
+  }
+  return derivedIntensityLabel();
+}
+
 function terrainSourceValue() {
   const value = els.terrainSourceSelect?.value;
   if (value === "cues" || value === "derived" || value === "blended") {
@@ -706,6 +717,16 @@ function derivedIntensityAt(timeS) {
     current = point;
   }
   return current;
+}
+
+function blendedTerrainIntensityAt(timeS) {
+  return blendTerrainIntensityAt(profile, timeS, terrainOptions());
+}
+
+function derivedIntensityLabel() {
+  return profile.derived_intensity_curve?.model_version === "manual-seed-v0.1"
+    ? "Seed intensity"
+    : "Derived intensity";
 }
 
 function formatDistance(meters) {
@@ -1043,15 +1064,21 @@ function drawDerivedIntensityCurve(ctx, plotLeft, plotWidth, area) {
     return;
   }
   ctx.beginPath();
-  for (const point of points) {
+  let previousY = null;
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index];
     const x = timeToX(point.t, plotLeft, plotWidth);
-    const y = area.bottom - Math.max(0, Math.min(1.25, point.intensity)) / 1.25 * (area.bottom - area.top);
-    if (point === points[0]) {
+    const y = intensityToY(point.intensity, area);
+    if (index === 0) {
       ctx.moveTo(x, y);
     } else {
+      ctx.lineTo(x, previousY);
       ctx.lineTo(x, y);
     }
+    previousY = y;
   }
+  const finalX = timeToX(profile.duration_s, plotLeft, plotWidth);
+  ctx.lineTo(finalX, previousY);
   ctx.strokeStyle = "rgba(216, 180, 254, 0.72)";
   ctx.lineWidth = 1.4;
   ctx.setLineDash([2, 6]);
@@ -1107,7 +1134,7 @@ function drawChartLabels(ctx, width, height, area, maxPower, minCadence, maxCade
   ctx.fillStyle = "rgba(250, 250, 250, 0.90)";
   ctx.fillText(`${minMusicBpm}-${maxMusicBpm} BPM`, 4, area.top + 62);
   ctx.fillStyle = "rgba(216, 180, 254, 0.90)";
-  ctx.fillText("Derived", 7, area.top + 78);
+  ctx.fillText(derivedIntensityLabel(), 7, area.top + 78);
   ctx.fillText(formatTime(0), 44, height - 5);
   const endText = formatTime(profile.duration_s);
   ctx.fillText(endText, width - 10 - ctx.measureText(endText).width, height - 5);
@@ -1130,6 +1157,10 @@ function cadenceToY(rpm, area, minCadence, maxCadence) {
 function musicBpmToY(bpm, area, minMusicBpm, maxMusicBpm) {
   const ratio = Math.max(0, Math.min(1, (bpm - minMusicBpm) / (maxMusicBpm - minMusicBpm)));
   return area.bottom - ratio * (area.bottom - area.top);
+}
+
+function intensityToY(intensity, area) {
+  return area.bottom - Math.max(0, Math.min(2, intensity)) / 2 * (area.bottom - area.top);
 }
 
 function onRideChartMouseMove(event) {
@@ -1172,6 +1203,8 @@ function updateRideChartTooltip(event, time) {
   const cadenceZone = cadenceZoneLabel(target.cadenceRpm);
   const terrainPoint = routePointAt(terrainRoute, terrainDistanceAtVideoTime(time));
   const derived = derivedIntensityAt(time);
+  const terrainSample = nearestTerrainSample(time);
+  const blendedIntensity = blendedTerrainIntensityAt(time);
   const sampleText = nearest
     ? `<span>Actual: ${nearest.power} W, ${nearest.cadence} rpm (${nearest.maintained ? "maintained" : "dropped"})</span>`
     : "<span>Actual: no sample yet</span>";
@@ -1182,8 +1215,11 @@ function updateRideChartTooltip(event, time) {
     <span>Target: ${target.watts} W (${Math.round(target.ftpPct * 100)}% FTP), ${target.cadenceRpm} rpm</span>
     <span>Mode: ${escapeHtml(target.modeLabel ?? "Workout")}${target.planBlock ? ` / ${escapeHtml(target.planBlock)}` : ""}</span>
     <span>Music BPM: ${target.musicBpm}</span>
-    <span>Derived intensity: ${derived ? `${Math.round(derived.intensity * 100)}%` : "not available"}</span>
-    <span>Terrain: ${terrainPoint.gradePercent.toFixed(1)}%, ${formatDistance(terrainPoint.distanceM)}, ${Math.round(terrainPoint.elevationM)} m elev</span>
+    <span>${derivedIntensityLabel()}: ${derived ? `${Math.round(derived.intensity * 100)}%` : "not available"}</span>
+    <span>Terrain source: ${escapeHtml(terrainSourceDisplayLabel())}</span>
+    <span>Blended terrain intensity: ${Math.round(blendedIntensity * 100)}%</span>
+    <span>Terrain: ${terrainPoint.gradePercent.toFixed(1)}%, ${formatDistance(terrainPoint.distanceM)}, ${Math.round(terrainPoint.elevationM)} m elev, +${Math.round(terrainPoint.elevationGainM)} m gain</span>
+    <span>Route sample: ${terrainSample ? `${Math.round(terrainSample.smoothedIntensity * 100)}% smoothed, ${terrainSample.gradePercent.toFixed(1)}% grade` : "not available"}</span>
     <span>Power zone: ${powerZone}</span>
     <span>Cadence zone: ${cadenceZone}</span>
     ${sampleText}
