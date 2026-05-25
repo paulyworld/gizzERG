@@ -55,6 +55,7 @@ const els = {
   rideChartTooltip: document.querySelector("#rideChartTooltip"),
   timelineSeekToggle: document.querySelector("#timelineSeekToggle"),
   songDivisionsToggle: document.querySelector("#songDivisionsToggle"),
+  blendedIntensityToggle: document.querySelector("#blendedIntensityToggle"),
   songStrip: document.querySelector("#songStrip"),
   ftpInput: document.querySelector("#ftpInput"),
   workoutModeSelect: document.querySelector("#workoutModeSelect"),
@@ -163,6 +164,7 @@ els.timelineSeekToggle.addEventListener("change", () => {
   els.rideChart.parentElement.classList.toggle("timeline-seek-enabled", els.timelineSeekToggle.checked);
 });
 els.songDivisionsToggle.addEventListener("change", drawRideChart);
+els.blendedIntensityToggle.addEventListener("change", drawRideChart);
 loadYouTubeApi()
   .then(createPlayer)
   .catch((error) => {
@@ -858,6 +860,9 @@ function drawRideChart() {
   drawPowerArea(ctx, plotLeft, plotWidth, plotArea, maxPower);
   drawTerrainProfile(ctx, plotLeft, plotWidth, plotArea);
   drawDerivedIntensityCurve(ctx, plotLeft, plotWidth, plotArea);
+  if (els.blendedIntensityToggle.checked) {
+    drawBlendedIntensityCurve(ctx, plotLeft, plotWidth, plotArea);
+  }
   drawActualSamples(ctx, plotLeft, plotWidth, plotArea, maxPower);
   drawTerrainProgress(ctx, plotLeft, plotWidth, plotArea);
   drawCadenceCurve(ctx, plotLeft, plotWidth, plotArea, minCadence, maxCadence);
@@ -1086,6 +1091,33 @@ function drawDerivedIntensityCurve(ctx, plotLeft, plotWidth, area) {
   ctx.setLineDash([]);
 }
 
+function drawBlendedIntensityCurve(ctx, plotLeft, plotWidth, area) {
+  if (!terrainRoute?.samples?.length) {
+    return;
+  }
+  ctx.beginPath();
+  let previousY = null;
+  for (let index = 0; index < terrainRoute.samples.length; index += 1) {
+    const sample = terrainRoute.samples[index];
+    const x = timeToX(sample.timeS, plotLeft, plotWidth);
+    const y = intensityToY(sample.intensity, area);
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, previousY);
+      ctx.lineTo(x, y);
+    }
+    previousY = y;
+  }
+  const finalX = timeToX(profile.duration_s, plotLeft, plotWidth);
+  ctx.lineTo(finalX, previousY);
+  ctx.strokeStyle = "rgba(52, 211, 153, 0.86)";
+  ctx.lineWidth = 1.8;
+  ctx.setLineDash([6, 3]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
 
 function drawActualSamples(ctx, plotLeft, plotWidth, area, maxPower) {
   const barWidth = Math.max(2, plotWidth / Math.max(profile.duration_s, 1));
@@ -1135,6 +1167,10 @@ function drawChartLabels(ctx, width, height, area, maxPower, minCadence, maxCade
   ctx.fillText(`${minMusicBpm}-${maxMusicBpm} BPM`, 4, area.top + 62);
   ctx.fillStyle = "rgba(216, 180, 254, 0.90)";
   ctx.fillText(derivedIntensityLabel(), 7, area.top + 78);
+  if (els.blendedIntensityToggle.checked) {
+    ctx.fillStyle = "rgba(52, 211, 153, 0.94)";
+    ctx.fillText("Blended", 7, area.top + 94);
+  }
   ctx.fillText(formatTime(0), 44, height - 5);
   const endText = formatTime(profile.duration_s);
   ctx.fillText(endText, width - 10 - ctx.measureText(endText).width, height - 5);
