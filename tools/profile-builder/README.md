@@ -12,6 +12,22 @@ Install the optional audio dependencies:
 python -m pip install -r tools\profile-builder\requirements.txt
 ```
 
+**Also required: `ffmpeg` on PATH** for the `--audio` and `--youtube-url`
+paths. yt-dlp uses it to post-process downloads to WAV (so librosa decodes
+them via the fast soundfile backend); librosa's audioread fallback uses it
+for any container soundfile can't read directly.
+
+Install ffmpeg:
+
+- Windows: `winget install ffmpeg` (or download from https://ffmpeg.org)
+- macOS: `brew install ffmpeg`
+- Linux: `apt install ffmpeg` / `dnf install ffmpeg`
+
+Alternative for systems without admin access: `pip install imageio-ffmpeg`
+bundles a static binary; add its directory to PATH before running this
+tool. The tool detects missing ffmpeg up front and produces a clear error
+rather than failing deep in librosa.
+
 ## Current workflow
 
 Provide an audio-feature JSON file:
@@ -53,8 +69,15 @@ python tools\profile-builder\build_profile.py `
   --sample-step-s 2
 ```
 
-Audio extraction currently writes dense points from `librosa` features at the
-requested sample interval.
+Audio extraction is **chunked**: the file is processed in 5-minute windows
+(tunable via `--window-s`) rather than loaded whole. A 2.5-hour concert
+processed whole eats ~10 GB of RAM and runs silently for several minutes;
+chunked extraction keeps memory under ~500 MB per chunk and emits a tqdm
+progress bar so long runs are legible.
+
+Features are normalized **globally** (5th/95th percentile across the whole
+ride) so a quiet song in the middle still reads as low intensity relative
+to the loud songs at the end.
 
 To download YouTube audio first, then extract:
 
