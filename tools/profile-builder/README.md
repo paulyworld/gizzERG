@@ -3,9 +3,14 @@
 First-pass local tooling for turning music analysis output into a
 `derived_intensity_curve` that the browser can render and use for terrain.
 
-This scaffold is intentionally dependency-free. The next pass can add
-`yt-dlp`/`librosa`, but the app should not have to change when the richer audio
-pipeline lands.
+The builder still accepts dependency-free precomputed feature JSON. It can also
+extract features from a local audio file with `librosa`.
+
+Install the optional audio dependencies:
+
+```powershell
+python -m pip install -r tools\profile-builder\requirements.txt
+```
 
 ## Current workflow
 
@@ -38,6 +43,19 @@ python tools\profile-builder\build_profile.py `
 
 The output is a `derived_intensity_curve` object that can be pasted into a
 profile or consumed by future profile JSON tooling.
+
+To extract directly from an audio file:
+
+```powershell
+python tools\profile-builder\build_profile.py `
+  --audio concert-audio.m4a `
+  --out derived-curve.json `
+  --sample-step-s 2
+```
+
+Audio extraction currently writes dense points from `librosa` features at the
+requested sample interval. Downloading source audio is intentionally separate;
+use a local audio file for this pass.
 
 ## Model notes
 

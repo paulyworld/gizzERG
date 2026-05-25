@@ -192,20 +192,23 @@ client. The browser still owns route design and preview.
 
 ## Profile Builder / Audio Features
 
-`tools/profile-builder/` is a dependency-free scaffold for the future audio
-feature pipeline. It does not download or analyze audio yet; it normalizes
-precomputed feature points into a `derived_intensity_curve` object shaped for
-the browser.
+`tools/profile-builder/` now has the first real local audio-feature path. It
+still accepts dependency-free precomputed feature JSON, and it can also extract
+features from a local audio file with `librosa`.
 
 - `build_profile.py` accepts feature JSON with points carrying `t`, `loudness`,
   `spectral_centroid`, `onset_density`, and `harmonic_ratio`.
+- `build_profile.py --audio <file>` uses `librosa` to extract RMS/loudness,
+  spectral centroid, onset strength, and harmonic/percussive balance, then
+  samples dense points at `--sample-step-s` seconds.
 - It writes `model_version`, `sample_step_s`, model weights, derived
   `intensity`, and per-point `audio_features`.
-- Current weights are loudness 0.40, spectral centroid 0.20, onset density
-  0.30, and percussive ratio 0.10.
-- Recommended next implementation pass is to add `yt-dlp`/`librosa` extraction
-  ahead of this normalization step, then generate 1-5 second sample curves for
-  manual shifting terrain.
+- Audio extraction emits `model_version="audio-features-librosa-v0.1"` by
+  default. Current weights are loudness 0.40, spectral centroid 0.20, onset
+  density 0.30, and percussive ratio 0.10.
+- Dependencies are in `tools/profile-builder/requirements.txt`. Downloading
+  source audio is still intentionally separate; use a local audio file for this
+  pass. `yt-dlp` can be added once the local extraction curve is validated.
 
 ## Tracklist Discovery Direction
 
