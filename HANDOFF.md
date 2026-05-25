@@ -206,9 +206,10 @@ features from a local audio file with `librosa`.
 - Audio extraction emits `model_version="audio-features-librosa-v0.1"` by
   default. Current weights are loudness 0.40, spectral centroid 0.20, onset
   density 0.30, and percussive ratio 0.10.
-- Dependencies are in `tools/profile-builder/requirements.txt`. Downloading
-  source audio is still intentionally separate; use a local audio file for this
-  pass. `yt-dlp` can be added once the local extraction curve is validated.
+- `build_profile.py --youtube-url <url>` downloads audio with `yt-dlp` and then
+  runs the same `librosa` path. Use `--work-dir` and `--keep-audio` while
+  tuning so the download can be reused.
+- Dependencies are in `tools/profile-builder/requirements.txt`.
 
 ## Tracklist Discovery Direction
 

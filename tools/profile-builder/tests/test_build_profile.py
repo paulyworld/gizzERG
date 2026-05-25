@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
+import tempfile
 import unittest
+from unittest import mock
 
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "build_profile.py"
@@ -50,6 +52,28 @@ class BuildProfileTests(unittest.TestCase):
             raise
 
         self.assertEqual(values, [0.0, 0.0, 0.0])
+
+    def test_newest_downloaded_file_prefers_files_not_present_before(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work_dir = Path(tmp)
+            old_file = work_dir / "old.webm"
+            old_file.write_text("old", encoding="utf-8")
+            before = set(work_dir.iterdir())
+            new_file = work_dir / "new.webm"
+            new_file.write_text("new", encoding="utf-8")
+
+            self.assertEqual(build_profile.newest_downloaded_file(work_dir, before), new_file)
+
+    def test_youtube_audio_file_uses_work_dir_and_keeps_audio_when_requested(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work_dir = Path(tmp)
+            audio_path = work_dir / "video.webm"
+
+            with mock.patch.object(build_profile, "download_youtube_audio", return_value=audio_path) as download:
+                with build_profile.youtube_audio_file("https://youtu.be/example", work_dir, keep_audio=True) as path:
+                    self.assertEqual(path, audio_path)
+
+            download.assert_called_once_with("https://youtu.be/example", work_dir)
 
 
 if __name__ == "__main__":

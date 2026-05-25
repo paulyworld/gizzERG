@@ -54,8 +54,21 @@ python tools\profile-builder\build_profile.py `
 ```
 
 Audio extraction currently writes dense points from `librosa` features at the
-requested sample interval. Downloading source audio is intentionally separate;
-use a local audio file for this pass.
+requested sample interval.
+
+To download YouTube audio first, then extract:
+
+```powershell
+python tools\profile-builder\build_profile.py `
+  --youtube-url "https://www.youtube.com/watch?v=bnnIdWzGSYI" `
+  --out derived-curve.json `
+  --sample-step-s 2 `
+  --work-dir .\tmp\profile-audio `
+  --keep-audio
+```
+
+`--keep-audio` is useful while tuning the model because the download can be
+reused. Omit it when you only need the output curve.
 
 ## Model notes
 

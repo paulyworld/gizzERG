@@ -2,7 +2,9 @@
 """Build a gizzERG derived_intensity_curve from audio or precomputed features.
 
 The default path accepts precomputed feature JSON. Passing ``--audio`` uses
-librosa to extract the first real dense curve directly from an audio file.
+librosa to extract a dense curve directly from a local audio file. Passing
+``--youtube-url`` downloads audio with yt-dlp first, then runs the same
+extraction path.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ import argparse
 import json
 import math
 from pathlib import Path
+import tempfile
 from typing import Sequence
 
 
@@ -27,13 +30,25 @@ def main() -> int:
     input_group = parser.add_mutually_exclusive_group(required=True)
     input_group.add_argument("--features", type=Path, help="Input feature JSON.")
     input_group.add_argument("--audio", type=Path, help="Input audio file for librosa extraction.")
+    input_group.add_argument("--youtube-url", help="YouTube URL to download with yt-dlp before extraction.")
     parser.add_argument("--out", required=True, type=Path, help="Output derived curve JSON.")
     parser.add_argument("--sample-step-s", type=float, default=None, help="Sample interval in seconds.")
     parser.add_argument("--model-version", default=None, help="Override model_version metadata.")
     parser.add_argument("--sample-rate", type=int, default=22050, help="Audio sample rate for librosa.load.")
+    parser.add_argument("--work-dir", type=Path, default=None, help="Directory for downloaded audio.")
+    parser.add_argument("--keep-audio", action="store_true", help="Keep downloaded audio when using --youtube-url.")
     args = parser.parse_args()
 
-    if args.audio:
+    if args.youtube_url:
+        audio_sample_step_s = args.sample_step_s if args.sample_step_s is not None else 2.0
+        with youtube_audio_file(args.youtube_url, args.work_dir, args.keep_audio) as audio_path:
+            feature_doc = extract_feature_doc_from_audio(
+                audio_path,
+                sample_step_s=audio_sample_step_s,
+                sample_rate=args.sample_rate,
+                model_version=args.model_version,
+            )
+    elif args.audio:
         audio_sample_step_s = args.sample_step_s if args.sample_step_s is not None else 2.0
         feature_doc = extract_feature_doc_from_audio(
             args.audio,
@@ -51,6 +66,67 @@ def main() -> int:
     )
     args.out.write_text(json.dumps(curve, indent=2) + "\n", encoding="utf-8")
     return 0
+
+
+class youtube_audio_file:
+    def __init__(self, url: str, work_dir: Path | None, keep_audio: bool = False):
+        self.url = url
+        self.keep_audio = keep_audio
+        self._temp_dir: tempfile.TemporaryDirectory | None = None
+        self.work_dir = work_dir
+        self.audio_path: Path | None = None
+
+    def __enter__(self) -> Path:
+        if self.work_dir is None:
+            self._temp_dir = tempfile.TemporaryDirectory(prefix="gizzerg-audio-")
+            self.work_dir = Path(self._temp_dir.name)
+        self.work_dir.mkdir(parents=True, exist_ok=True)
+        self.audio_path = download_youtube_audio(self.url, self.work_dir)
+        return self.audio_path
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if self.keep_audio:
+            return
+        if self._temp_dir is not None:
+            self._temp_dir.cleanup()
+
+
+def download_youtube_audio(url: str, work_dir: Path) -> Path:
+    try:
+        from yt_dlp import YoutubeDL
+    except ImportError as exc:
+        raise RuntimeError(
+            "YouTube extraction requires yt-dlp; install tools/profile-builder/requirements.txt"
+        ) from exc
+
+    before = set(work_dir.iterdir()) if work_dir.exists() else set()
+    options = {
+        "format": "bestaudio/best",
+        "outtmpl": str(work_dir / "%(id)s.%(ext)s"),
+        "noplaylist": True,
+        "quiet": False,
+    }
+    with YoutubeDL(options) as ydl:
+        ydl.download([url])
+    return newest_downloaded_file(work_dir, before)
+
+
+def newest_downloaded_file(work_dir: Path, before: set[Path] | None = None) -> Path:
+    before = before or set()
+    candidates = [
+        path
+        for path in work_dir.iterdir()
+        if path.is_file() and path not in before and path.suffix.lower() not in {".part", ".ytdl"}
+    ]
+    if not candidates:
+        candidates = [
+            path
+            for path in work_dir.iterdir()
+            if path.is_file() and path.suffix.lower() not in {".part", ".ytdl"}
+        ]
+    if not candidates:
+        raise RuntimeError(f"yt-dlp did not produce an audio file in {work_dir}")
+    return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
 def extract_feature_doc_from_audio(
