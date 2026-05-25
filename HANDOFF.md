@@ -337,6 +337,26 @@ Wire format matches the sidecar `annotate` command exactly — see
 `bug`, `unfair`, `marker`) is pinned to that doc by a test in
 `tests/annotations.test.mjs`.
 
+## Terrain authoring direction
+
+Profile authoring direction (Blended Terrain Model, override types, override
+events, terrain themes) is **maintained in the engine planning doc**, not
+duplicated here:
+
+- **Canonical proposal:** `repos/engine/docs/music-intensity-proposal.md`
+  (PR #13). See Piece 3b — Blended Terrain Model for the next step
+  (`Authored cues` / `Derived intensity` / `Blended` selector + blend slider
+  + typed override events).
+- **Vocabulary anchor:** `repos/engine/docs/vocabulary.md` Part 3 — Profile
+  Authoring Vocabulary. Defines override types (`cap` / `floor` / `anchor` /
+  `event` / `manual-override`), override events (`crescendo` / `drop` /
+  `song-boundary`), and terrain themes (`climbing` / `rolling` / `flat` /
+  `mixed`) with stable wire-format names.
+
+Edit those files first; reference them here. The drift risk that motivated
+this split: two near-mirror copies (engine doc + HANDOFF) would drift out
+of sync on the next edit. The engine doc wins.
+
 ## Open Hardening Notes
 
 - Harden `normalizeProfile` against malformed profile files where every cue has
