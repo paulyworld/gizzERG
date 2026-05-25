@@ -1,3 +1,16 @@
 librosa>=0.10,<0.12
 numpy>=1.24
+soundfile>=0.12
+tqdm>=4.66
 yt-dlp>=2025.1.0
+
+# Also required at runtime (not pip-installable):
+#
+#   ffmpeg — used by yt-dlp for audio post-processing and by librosa's
+#   audioread fallback for decoding webm/m4a/etc. Install via:
+#     Windows: winget install ffmpeg  (or download from https://ffmpeg.org)
+#     macOS:   brew install ffmpeg
+#     Linux:   apt install ffmpeg
+#
+# Alternatively, `pip install imageio-ffmpeg` provides a bundled binary;
+# add its directory to PATH before invoking build_profile.py.

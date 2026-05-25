@@ -14,3 +14,7 @@ npm-debug.log*
 # Local dev / scratch
 *.local
 scratch/
+
+# Python (tools/profile-builder/)
+__pycache__/
+*.pyc
