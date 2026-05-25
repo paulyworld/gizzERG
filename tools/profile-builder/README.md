@@ -53,4 +53,3 @@ Recommended future controls:
 - `smoothing_window_s`: suppress short false peaks, especially crescendos before breaks.
 - `boundary_hold_s`: require elevated signal to persist before promoting it to sustained terrain.
 - Event overrides: first-class `crescendo`, `drop`, `sprint`, `lull`, and `song-boundary`.
-

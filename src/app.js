@@ -18,7 +18,8 @@ import { workoutModes } from "./workout-patterns.js";
 const profile = concertProfiles[0];
 const controller = new ErgWorkoutController(profile);
 const TERRAIN_TUNING_HELP = {
-  terrainSourceSelect: "Derived intensity uses profile.derived_intensity_curve when present; authored cues uses the manual FTP cue map.",
+  terrainSourceSelect: "Blended starts from the derived curve, pulls toward authored cues, and applies terrain overrides. Derived and authored isolate each source.",
+  terrainBlend: "Default 65% derived. Lower values trust authored cues more; higher values trust the dense derived curve more.",
   terrainSampleStep: "Default 5s. Lower values sample the route more often, which will matter once audio-derived curves mark fast musical changes.",
   terrainGradeScale: "Default 18. Higher values turn the same intensity change into steeper climbs and deeper descents.",
   terrainBaseline: "Default 0.55. Intensities above this become climbs; intensities below this become descents or flats.",
@@ -30,7 +31,8 @@ const TERRAIN_TUNING_HELP = {
   terrainDragArea: "Default 0.63. Higher values increase aero drag and reduce modeled speed most on fast/flat sections.",
 };
 const DEFAULT_TERRAIN_TUNING = Object.freeze({
-  terrainSourceSelect: "derived",
+  terrainSourceSelect: "blended",
+  terrainBlend: 0.65,
   terrainSampleStep: 5,
   terrainGradeScale: 18,
   terrainBaseline: 0.55,
@@ -61,6 +63,8 @@ const els = {
   sidecarUrlInput: document.querySelector("#sidecarUrlInput"),
   trackOffsetInput: document.querySelector("#trackOffsetInput"),
   terrainSourceSelect: document.querySelector("#terrainSourceSelect"),
+  terrainBlend: document.querySelector("#terrainBlend"),
+  terrainBlendOut: document.querySelector("#terrainBlendOut"),
   terrainSampleStep: document.querySelector("#terrainSampleStep"),
   terrainSampleStepOut: document.querySelector("#terrainSampleStepOut"),
   terrainGradeScale: document.querySelector("#terrainGradeScale"),
@@ -499,7 +503,8 @@ function terrainOptions() {
     ftp: Number(els.ftpInput?.value) || controller.ftp,
     riderWeightKg: Number(els.weightInput?.value) || controller.weightKg,
     sampleStepS: Number(els.terrainSampleStep?.value) || DEFAULT_TERRAIN_TUNING.terrainSampleStep,
-    intensitySource: els.terrainSourceSelect?.value === "cues" ? "cues" : "derived",
+    intensitySource: terrainSourceValue(),
+    intensityBlend: Number(els.terrainBlend?.value) || DEFAULT_TERRAIN_TUNING.terrainBlend,
     gradeScale: Number(els.terrainGradeScale?.value) || DEFAULT_TERRAIN_TUNING.terrainGradeScale,
     baselineIntensity: Number(els.terrainBaseline?.value) || DEFAULT_TERRAIN_TUNING.terrainBaseline,
     minGrade: Number(els.terrainMinGrade?.value) || DEFAULT_TERRAIN_TUNING.terrainMinGrade,
@@ -517,6 +522,7 @@ function defaultTerrainOptions() {
     riderWeightKg: Number(els.weightInput?.value) || controller.weightKg,
     sampleStepS: DEFAULT_TERRAIN_TUNING.terrainSampleStep,
     intensitySource: DEFAULT_TERRAIN_TUNING.terrainSourceSelect,
+    intensityBlend: DEFAULT_TERRAIN_TUNING.terrainBlend,
     gradeScale: DEFAULT_TERRAIN_TUNING.terrainGradeScale,
     baselineIntensity: DEFAULT_TERRAIN_TUNING.terrainBaseline,
     minGrade: DEFAULT_TERRAIN_TUNING.terrainMinGrade,
@@ -531,6 +537,7 @@ function defaultTerrainOptions() {
 function terrainInputs() {
   return [
     els.terrainSourceSelect,
+    els.terrainBlend,
     els.terrainSampleStep,
     els.terrainGradeScale,
     els.terrainBaseline,
@@ -591,6 +598,7 @@ function resetTerrainTuning() {
 }
 
 function renderTerrainTuning() {
+  els.terrainBlendOut.textContent = `${Math.round(Number(els.terrainBlend.value) * 100)}%`;
   els.terrainSampleStepOut.textContent = `${Math.round(Number(els.terrainSampleStep.value))}s`;
   els.terrainGradeScaleOut.textContent = Number(els.terrainGradeScale.value).toFixed(1);
   els.terrainBaselineOut.textContent = Number(els.terrainBaseline.value).toFixed(2);
@@ -622,7 +630,21 @@ function renderTerrainSummary() {
 }
 
 function terrainSourceLabel() {
-  return els.terrainSourceSelect?.value === "cues" ? "authored cues" : "derived intensity";
+  if (terrainSourceValue() === "cues") {
+    return "authored cues";
+  }
+  if (terrainSourceValue() === "blended") {
+    return `${Math.round(Number(els.terrainBlend?.value || 0) * 100)}% blended`;
+  }
+  return "derived intensity";
+}
+
+function terrainSourceValue() {
+  const value = els.terrainSourceSelect?.value;
+  if (value === "cues" || value === "derived" || value === "blended") {
+    return value;
+  }
+  return DEFAULT_TERRAIN_TUNING.terrainSourceSelect;
 }
 
 function terrainDistanceAtVideoTime(timeS) {

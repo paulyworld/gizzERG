@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  blendTerrainIntensityAt,
   estimatePowerForSpeedW,
   estimateSpeedMps,
   intensityToGrade,
@@ -111,6 +112,83 @@ test("sampleTerrainRoute can force authored cues over derived intensity", () => 
   }, { sampleStepS: 10, smoothingWindowS: 0, intensitySource: "cues" });
 
   assert.ok(route.samples.find((sample) => sample.timeS === 10).gradePercent < 0);
+});
+
+test("sampleTerrainRoute can blend derived intensity with authored cues", () => {
+  const route = sampleTerrainRoute({
+    duration_s: 20,
+    cues: [
+      { t: 0, ftp_pct: 0.4 },
+      { t: 10, ftp_pct: 0.4 },
+    ],
+    derived_intensity_curve: {
+      model_version: "test",
+      points: [
+        { t: 0, intensity: 1.0 },
+        { t: 10, intensity: 1.0 },
+      ],
+    },
+  }, { sampleStepS: 10, smoothingWindowS: 0, intensitySource: "blended", intensityBlend: 0.5 });
+
+  assert.equal(route.samples.find((sample) => sample.timeS === 10).intensity, 0.7);
+});
+
+test("terrain overrides cap, floor, anchor, and manual override blended intensity", () => {
+  const blendedProfile = {
+    duration_s: 40,
+    cues: [{ t: 0, ftp_pct: 0.4 }],
+    derived_intensity_curve: {
+      model_version: "test",
+      points: [{ t: 0, intensity: 1.0 }],
+    },
+    terrain_overrides: [
+      { start_s: 10, end_s: 10, type: "cap", max_intensity: 0.55 },
+      { start_s: 20, end_s: 20, type: "floor", min_intensity: 0.9 },
+      { start_s: 30, end_s: 30, type: "anchor", intensity: 0.5, weight: 0.5 },
+      { start_s: 40, end_s: 40, type: "manual-override", intensity: 1.25 },
+    ],
+  };
+
+  assert.equal(blendTerrainIntensityAt(blendedProfile, 10, { sampleStepS: 10, intensityBlend: 0.5 }), 0.55);
+  assert.equal(blendTerrainIntensityAt(blendedProfile, 20, { sampleStepS: 10, intensityBlend: 0.5 }), 0.9);
+  assert.equal(blendTerrainIntensityAt(blendedProfile, 30, { sampleStepS: 10, intensityBlend: 0.5 }), 0.6);
+  assert.equal(blendTerrainIntensityAt(blendedProfile, 40, { sampleStepS: 10, intensityBlend: 0.5 }), 1.25);
+});
+
+test("drop event allows over-FTP intensity while schema safety bounds stay at 2.0", () => {
+  const dropProfile = {
+    duration_s: 20,
+    cues: [{ t: 0, ftp_pct: 0.5 }],
+    derived_intensity_curve: {
+      model_version: "test",
+      points: [{ t: 0, intensity: 0.5 }],
+    },
+    terrain_overrides: [
+      { start_s: 10, end_s: 10, type: "event", event: "drop", intensity: 1.35 },
+      { start_s: 20, end_s: 20, type: "event", event: "drop", intensity: 2.4 },
+    ],
+  };
+
+  assert.equal(blendTerrainIntensityAt(dropProfile, 10, { sampleStepS: 10 }), 1.35);
+  assert.equal(blendTerrainIntensityAt(dropProfile, 20, { sampleStepS: 10 }), 2.0);
+});
+
+test("crescendo event ramps inside its window but does not sustain afterward", () => {
+  const crescendoProfile = {
+    duration_s: 30,
+    cues: [{ t: 0, ftp_pct: 0.45 }],
+    derived_intensity_curve: {
+      model_version: "test",
+      points: [{ t: 0, intensity: 0.45 }],
+    },
+    terrain_overrides: [
+      { start_s: 10, end_s: 20, type: "event", event: "crescendo", intensity: 1.2 },
+    ],
+  };
+
+  assert.equal(blendTerrainIntensityAt(crescendoProfile, 10, { sampleStepS: 5 }), 0.45);
+  assert.equal(blendTerrainIntensityAt(crescendoProfile, 20, { sampleStepS: 5 }), 1.2);
+  assert.equal(blendTerrainIntensityAt(crescendoProfile, 30, { sampleStepS: 5 }), 0.45);
 });
 
 test("sampleTerrainRoute smooths sudden intensity changes", () => {

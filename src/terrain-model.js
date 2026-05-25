@@ -5,6 +5,7 @@ export const DEFAULT_TERRAIN_OPTIONS = Object.freeze({
   ftp: 250,
   riderWeightKg: 75,
   bikeWeightKg: 9,
+  intensityBlend: 0.65,
   baselineIntensity: 0.55,
   gradeScale: 18,
   minGrade: -2,
@@ -26,7 +27,7 @@ export function intensityToGrade(intensity, options = {}) {
 
 export function sampleTerrainRoute(profile, options = {}) {
   const opts = { ...DEFAULT_TERRAIN_OPTIONS, ...options };
-  const cues = normalizeCues(profile, opts);
+  const cues = normalizeIntensitySeries(profile, opts);
   const durationS = Math.max(Number(profile.duration_s ?? 0), cues.at(-1).t);
   const stepS = Math.max(1, Number(opts.sampleStepS));
   const alpha = stepS / (Math.max(0, Number(opts.smoothingWindowS)) + stepS);
@@ -74,6 +75,20 @@ export function sampleTerrainRoute(profile, options = {}) {
     elevationGainM,
     samples,
   };
+}
+
+export function blendTerrainIntensityAt(profile, timeS, options = {}) {
+  const opts = { ...DEFAULT_TERRAIN_OPTIONS, ...options, intensitySource: "blended" };
+  const authored = normalizeAuthoredCues(profile);
+  const derived = normalizeDerivedCurve(profile);
+  if (authored.length === 0) {
+    throw new Error("terrain profile must include at least one valid cue");
+  }
+  if (derived.length === 0) {
+    return intensityAt(authored, timeS);
+  }
+  const overrides = normalizeTerrainOverrides(profile);
+  return blendedIntensityAt(authored, derived, overrides, timeS, opts);
 }
 
 export function estimateSpeedMps(powerW, gradePercent, options = {}) {
@@ -145,7 +160,7 @@ export function routePointAt(route, distanceM) {
   };
 }
 
-function normalizeCues(profile, options = {}) {
+function normalizeIntensitySeries(profile, options = {}) {
   if (!profile || !Array.isArray(profile.cues) || profile.cues.length === 0) {
     throw new Error("terrain profile must include at least one cue");
   }
@@ -153,18 +168,24 @@ function normalizeCues(profile, options = {}) {
   if (options.intensitySource === "derived" && derived.length > 0) {
     return derived;
   }
-  const cues = profile.cues
+  const authored = normalizeAuthoredCues(profile);
+  if (authored.length === 0) {
+    throw new Error("terrain profile must include at least one valid cue");
+  }
+  if (options.intensitySource === "blended" && derived.length > 0) {
+    return sampleBlendedSeries(profile, authored, derived, options);
+  }
+  return authored;
+}
+
+function normalizeAuthoredCues(profile) {
+  return profile.cues
     .map((cue) => ({
       t: Number(cue.t),
-      intensity: Number(cue.intensity ?? cue.ftp_pct),
+      intensity: normalizeIntensity(cue.terrain_intensity ?? cue.intensity ?? cue.ftp_pct),
     }))
     .filter((cue) => Number.isFinite(cue.t) && Number.isFinite(cue.intensity))
     .sort((a, b) => a.t - b.t);
-
-  if (cues.length === 0) {
-    throw new Error("terrain profile must include at least one valid cue");
-  }
-  return cues;
 }
 
 function normalizeDerivedCurve(profile) {
@@ -175,10 +196,97 @@ function normalizeDerivedCurve(profile) {
   return points
     .map((point) => ({
       t: Number(point.t),
-      intensity: Number(point.intensity),
+      intensity: normalizeIntensity(point.intensity),
     }))
     .filter((point) => Number.isFinite(point.t) && Number.isFinite(point.intensity))
     .sort((a, b) => a.t - b.t);
+}
+
+function sampleBlendedSeries(profile, authored, derived, options) {
+  const durationS = Math.max(Number(profile.duration_s ?? 0), authored.at(-1).t, derived.at(-1).t);
+  const stepS = Math.max(1, Number(options.sampleStepS ?? DEFAULT_TERRAIN_OPTIONS.sampleStepS));
+  const blend = clamp(options.intensityBlend ?? DEFAULT_TERRAIN_OPTIONS.intensityBlend, 0, 1);
+  const overrides = normalizeTerrainOverrides(profile);
+  const samples = [];
+
+  for (let timeS = 0; timeS <= durationS; timeS += stepS) {
+    samples.push({
+      t: timeS,
+      intensity: blendedIntensityAt(authored, derived, overrides, timeS, { ...options, intensityBlend: blend }),
+    });
+  }
+  return samples;
+}
+
+function blendedIntensityAt(authored, derived, overrides, timeS, options) {
+  const blend = clamp(options.intensityBlend ?? DEFAULT_TERRAIN_OPTIONS.intensityBlend, 0, 1);
+  const authoredIntensity = intensityAt(authored, timeS);
+  const derivedIntensity = intensityAt(derived, timeS);
+  return applyTerrainOverrides(lerp(authoredIntensity, derivedIntensity, blend), timeS, overrides);
+}
+
+function normalizeTerrainOverrides(profile) {
+  const overrides = profile?.terrain_overrides;
+  if (!Array.isArray(overrides)) {
+    return [];
+  }
+  return overrides
+    .map((override) => ({
+      startS: Number(override.start_s ?? override.t ?? 0),
+      endS: Number(override.end_s ?? override.start_s ?? override.t ?? 0),
+      type: String(override.type ?? ""),
+      event: override.event ? String(override.event) : null,
+      intensity: normalizeIntensity(override.intensity),
+      minIntensity: normalizeIntensity(override.min_intensity),
+      maxIntensity: normalizeIntensity(override.max_intensity),
+      weight: clamp(override.weight ?? 1, 0, 1),
+    }))
+    .filter((override) => (
+      Number.isFinite(override.startS)
+      && Number.isFinite(override.endS)
+      && override.endS >= override.startS
+    ))
+    .sort((a, b) => a.startS - b.startS);
+}
+
+function applyTerrainOverrides(baseIntensity, timeS, overrides) {
+  let intensity = baseIntensity;
+  let manual = null;
+
+  for (const override of overrides) {
+    if (timeS < override.startS || timeS > override.endS) {
+      continue;
+    }
+    if (override.type === "manual-override" && Number.isFinite(override.intensity)) {
+      manual = override.intensity;
+      continue;
+    }
+    if (override.type === "cap" && Number.isFinite(override.maxIntensity)) {
+      intensity = Math.min(intensity, override.maxIntensity);
+    } else if (override.type === "floor" && Number.isFinite(override.minIntensity)) {
+      intensity = Math.max(intensity, override.minIntensity);
+    } else if (override.type === "anchor" && Number.isFinite(override.intensity)) {
+      intensity = lerp(intensity, override.intensity, override.weight);
+    } else if (override.type === "event") {
+      intensity = applyTerrainEvent(intensity, timeS, override);
+    }
+  }
+  return manual ?? normalizeIntensity(intensity);
+}
+
+function applyTerrainEvent(baseIntensity, timeS, override) {
+  if (!Number.isFinite(override.intensity)) {
+    return baseIntensity;
+  }
+  if (override.event === "drop") {
+    return Math.max(baseIntensity, override.intensity);
+  }
+  if (override.event === "crescendo") {
+    const span = Math.max(1e-9, override.endS - override.startS);
+    const progress = clamp((timeS - override.startS) / span, 0, 1);
+    return Math.max(baseIntensity, lerp(baseIntensity, override.intensity, progress));
+  }
+  return baseIntensity;
 }
 
 function intensityAt(cues, timeS) {
@@ -198,4 +306,9 @@ function lerp(a, b, t) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, Number(value)));
+}
+
+function normalizeIntensity(value) {
+  const intensity = Number(value);
+  return Number.isFinite(intensity) ? clamp(intensity, 0, 2) : NaN;
 }
