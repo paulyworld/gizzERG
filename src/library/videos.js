@@ -1,0 +1,33 @@
+export const concertVideos = [
+  {
+    id: "bnnIdWzGSYI",
+    youtube_id: "bnnIdWzGSYI",
+    youtube_url: "https://www.youtube.com/watch?v=bnnIdWzGSYI",
+    title: "King Gizzard - Live in Greece '25 Night 2",
+    duration_s: 8753,
+    tracklist_source: {
+      name: "Bandcamp",
+      url: "https://midnightgnomepeople.bandcamp.com/album/live-in-greece-25",
+      note: "Night 2 is the YouTube video bnnIdWzGSYI. Tracks 18-33 are the Night 2 song order.",
+    },
+    tracklist_intro_offset_s: 833,
+    tracks: [
+      { title: "Gila Monster", duration_s: 286 },
+      { title: "Motor Spirit", duration_s: 676 },
+      { title: "I'm in Your Mind", duration_s: 241 },
+      { title: "I'm Not in Your Mind", duration_s: 269 },
+      { title: "Cellophane", duration_s: 408 },
+      { title: "I'm in Your Mind Fuzz", duration_s: 220 },
+      { title: "The Balrog", duration_s: 300 },
+      { title: "Ambergris", duration_s: 355 },
+      { title: "Sad Pilot", duration_s: 416 },
+      { title: "Iron Lung", duration_s: 1034 },
+      { title: "Evil Death Roll", duration_s: 606 },
+      { title: "Muddy Water", duration_s: 343 },
+      { title: "The Bitter Boogie", duration_s: 538 },
+      { title: "Hog Calling Contest", duration_s: 274 },
+      { title: "Kepler-22b", duration_s: 824 },
+      { title: "Set", duration_s: 1130 },
+    ],
+  },
+];

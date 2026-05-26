@@ -25,10 +25,17 @@ instead of being display-only.
   workout targets while using the music as a rough guide.
 - `src/concert-profile.js` contains the first manual rolling map for
   `bnnIdWzGSYI`.
-- The same profile now includes a seeded `derived_intensity_curve` with
-  `model_version`. This seed mirrors authored cue intensity until the audio
-  feature preprocessor lands, but it gives the browser and later tools a real
-  schema to consume.
+- The app now has a minimal profile library split:
+  `src/library/videos.js` owns video identity, YouTube URL, duration, intro
+  offset, source metadata, and tracklist; `src/library/intensity-curves.js`
+  owns selectable intensity curves; `src/concert-profile.js` composes those
+  into the app-facing profile.
+- The default curve remains the manual seeded `derived_intensity_curve` with
+  `model_version="manual-seed-v0.1"`. A selectable 20-minute
+  `audio-features-librosa-v0.3-section-dynamics-preview-20m` curve is also
+  registered for the King Gizzard video. It uses dense audio-derived points for
+  video 13:53-33:53 and manual seed points outside that sample window, so
+  testing the new curve does not break the rest of the concert.
 - The profile also includes Bandcamp-derived Night 2 tracklist metadata for the
   same video. The source is `Live in Greece '25` on Midnight Gnome People's
   Bandcamp page, which explicitly lists `bnnIdWzGSYI` as Night 2 and identifies
@@ -221,6 +228,34 @@ features from a local audio file with `librosa`.
   tuning so the download can be reused.
 - Dependencies are in `tools/profile-builder/requirements.txt`.
 
+### Curve / video library
+
+The settings panel has two selectors:
+
+- `Video` is populated from `concertProfiles`, which currently wraps one
+  library video: `bnnIdWzGSYI`.
+- `Curve` is populated from `profile.available_intensity_curves`. Current
+  options are `manual-seed` and `audio-v0.3-20m`.
+
+The file layout is intentionally small but points toward a future library
+manager:
+
+- `src/library/videos.js`: canonical video metadata, including
+  `youtube_id`, `youtube_url`, `duration_s`, `tracklist_intro_offset_s`, and
+  `tracks`.
+- `src/library/intensity-curves.js`: registered curves for each video id. The
+  manual seed lives here, and preview curves are composed here.
+- `src/audio-derived-curves.js`: generated dense curve data. Keep generated
+  audio-feature payloads out of `concert-profile.js`; register them through
+  `src/library/intensity-curves.js`.
+- `src/concert-profile.js`: app-facing composition layer for the current MVP
+  controller/tests.
+
+This keeps the current manual setup as the default while allowing local curve
+experiments from the UI. For now, adding another video means adding one object
+to `videos.js`, adding its curve options to `intensity-curves.js`, and adding
+the composed profile in `concert-profile.js`.
+
 ### Claude handoff — yt-dlp + librosa validation
 
 Codex added the implementation but has **not** run a live YouTube download yet.
@@ -248,14 +283,17 @@ python tools\profile-builder\build_profile.py `
   --keep-audio
 ```
 
-Review the generated JSON before replacing the profile seed:
+Review generated JSON before registering it as a selectable curve:
 
 - Confirm duration/point count roughly matches the YouTube video length.
 - Confirm `model_version` is `audio-features-librosa-v0.3-section-dynamics`.
 - Check min/median/max intensity and a handful of high-intensity timestamps.
 - Compare peaks against obvious musical peaks and the 13:53 tracklist intro
   offset.
-- Do **not** paste into `src/concert-profile.js` until the curve looks sane.
+- Do **not** paste dense generated curves into `src/concert-profile.js`.
+  Put generated payloads in a dedicated module such as
+  `src/audio-derived-curves.js`, then register/select them through
+  `src/library/intensity-curves.js`.
 
 Recommended follow-up if the curve is hard to inspect: add a tiny summary mode
 to `build_profile.py` or a separate script that prints duration, sample step,

@@ -16,8 +16,8 @@ import {
 import { estimatePlannedWorkout, summarizeCompliance, summarizeRideSamples } from "./workout-analysis.js";
 import { workoutModes } from "./workout-patterns.js";
 
-const profile = concertProfiles[0];
-const controller = new ErgWorkoutController(profile);
+let profile = concertProfiles[0];
+let controller = new ErgWorkoutController(profile);
 const TERRAIN_TUNING_HELP = {
   terrainSourceSelect: "Blended starts from the derived curve, pulls toward authored cues, and applies terrain overrides. Derived and authored isolate each source.",
   terrainBlend: "Default 65% derived. Lower values trust authored cues more; higher values trust the dense derived curve more.",
@@ -57,6 +57,8 @@ const els = {
   songDivisionsToggle: document.querySelector("#songDivisionsToggle"),
   blendedIntensityToggle: document.querySelector("#blendedIntensityToggle"),
   songStrip: document.querySelector("#songStrip"),
+  profileSelect: document.querySelector("#profileSelect"),
+  curveSelect: document.querySelector("#curveSelect"),
   ftpInput: document.querySelector("#ftpInput"),
   workoutModeSelect: document.querySelector("#workoutModeSelect"),
   weightInput: document.querySelector("#weightInput"),
@@ -137,11 +139,9 @@ const annotations = [];
 let annotationFocusRestore = null;
 let terrainRoute = buildTerrainRoute();
 
-els.profileTitle.textContent = profile.title;
-els.seekSlider.max = String(profile.duration_s);
-els.trackOffsetInput.value = formatDurationInput(profile.tracklist_intro_offset_s ?? 0);
-els.warmupDurationInput.value = formatDurationInput(profile.tracklist_intro_offset_s ?? 15 * 60);
-els.trackSourceText.textContent = `${profile.tracklist_source?.name ?? "Tracklist"} song bands. Adjust offset if the video has an intro.`;
+populateProfileSelect();
+populateCurveSelect();
+renderProfileMetadata({ resetTimingInputs: true });
 for (const mode of workoutModes) {
   const option = document.createElement("option");
   option.value = mode.id;
@@ -189,6 +189,13 @@ els.seekSlider.addEventListener("change", () => {
   tick(true);
 });
 els.connectButton.addEventListener("click", connectSidecar);
+els.profileSelect.addEventListener("change", () => {
+  populateCurveSelect();
+  activateSelectedProfile({ reloadVideo: true });
+});
+els.curveSelect.addEventListener("change", () => {
+  activateSelectedProfile({ reloadVideo: false });
+});
 
 for (const input of [els.ftpInput, els.weightInput, els.maxTargetInput]) {
   input.addEventListener("input", () => {
@@ -279,6 +286,105 @@ function createPlayer(YTApi) {
       onError: onPlayerError,
     },
   });
+}
+
+function populateProfileSelect() {
+  els.profileSelect.innerHTML = "";
+  for (const [index, candidate] of concertProfiles.entries()) {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = candidate.title;
+    els.profileSelect.append(option);
+  }
+  els.profileSelect.value = "0";
+}
+
+function curveOptionsFor(candidate) {
+  const options = Array.isArray(candidate.available_intensity_curves)
+    ? candidate.available_intensity_curves
+    : [];
+  if (options.length > 0) {
+    return options;
+  }
+  return [
+    {
+      id: "default",
+      label: candidate.derived_intensity_curve?.model_version ?? "Default curve",
+      curve: candidate.derived_intensity_curve,
+    },
+  ];
+}
+
+function populateCurveSelect() {
+  const baseProfile = concertProfiles[Number(els.profileSelect.value) || 0] ?? concertProfiles[0];
+  els.curveSelect.innerHTML = "";
+  for (const optionConfig of curveOptionsFor(baseProfile)) {
+    const option = document.createElement("option");
+    option.value = optionConfig.id;
+    option.textContent = optionConfig.label;
+    option.title = optionConfig.curve?.note ?? optionConfig.curve?.model_version ?? "";
+    els.curveSelect.append(option);
+  }
+  els.curveSelect.value = curveOptionsFor(baseProfile)[0]?.id ?? "default";
+}
+
+function selectedProfile() {
+  const baseProfile = concertProfiles[Number(els.profileSelect.value) || 0] ?? concertProfiles[0];
+  const curveOption = curveOptionsFor(baseProfile).find((option) => option.id === els.curveSelect.value)
+    ?? curveOptionsFor(baseProfile)[0];
+  return {
+    ...baseProfile,
+    version: curveOption?.id ? `${baseProfile.version}:${curveOption.id}` : baseProfile.version,
+    derived_intensity_curve: curveOption?.curve ?? baseProfile.derived_intensity_curve,
+  };
+}
+
+function activateSelectedProfile({ reloadVideo = false } = {}) {
+  const previousVideoId = profile.video_id;
+  profile = selectedProfile();
+  controller = new ErgWorkoutController(profile);
+  controller.setRider({
+    ftp: els.ftpInput.value,
+    weightKg: els.weightInput.value,
+    maxWatts: els.maxTargetInput.value,
+  });
+  controller.setMode({
+    modeId: els.workoutModeSelect.value,
+    warmupMinutes: parseDurationInput(els.warmupDurationInput.value, 15 * 60) / 60,
+  });
+  latestVideoTime = Math.min(latestVideoTime, profile.duration_s);
+  els.seekSlider.value = String(Math.round(latestVideoTime));
+  currentSongKey = "";
+  terrainRoute = buildTerrainRoute();
+  renderProfileMetadata({ resetTimingInputs: reloadVideo });
+  clearRideSamples();
+  renderTimeline();
+  renderSongStrip();
+  renderTerrainSummary();
+  renderTarget(controller.targetAt(latestVideoTime));
+  updateClock();
+  drawRideChart();
+  if (reloadVideo && player && previousVideoId !== profile.video_id) {
+    player.loadVideoById(profile.video_id);
+  }
+}
+
+function renderProfileMetadata({ resetTimingInputs = false } = {}) {
+  els.profileTitle.textContent = profile.title;
+  videoDuration = profile.duration_s;
+  els.seekSlider.max = String(profile.duration_s);
+  if (resetTimingInputs) {
+    els.trackOffsetInput.value = formatDurationInput(profile.tracklist_intro_offset_s ?? 0);
+    els.warmupDurationInput.value = formatDurationInput(profile.tracklist_intro_offset_s ?? 15 * 60);
+  }
+  const curveLabel = selectedCurveLabel();
+  els.trackSourceText.textContent = `${profile.tracklist_source?.name ?? "Tracklist"} song bands. Curve: ${curveLabel}.`;
+}
+
+function selectedCurveLabel() {
+  return els.curveSelect.selectedOptions[0]?.textContent
+    ?? profile.derived_intensity_curve?.model_version
+    ?? "default";
 }
 
 function onPlayerReady() {
