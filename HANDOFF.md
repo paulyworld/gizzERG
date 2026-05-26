@@ -197,15 +197,25 @@ still accepts dependency-free precomputed feature JSON, and it can also extract
 features from a local audio file with `librosa`.
 
 - `build_profile.py` accepts feature JSON with points carrying `t`, `loudness`,
-  `spectral_centroid`, `onset_density`, and `harmonic_ratio`.
+  `spectral_centroid`, `onset_density`, `harmonic_ratio`,
+  `spectral_contrast`, and `spectral_change`. The last two are optional for
+  older feature docs and default to zero in the weighted model.
 - `build_profile.py --audio <file>` uses `librosa` to extract RMS/loudness,
-  spectral centroid, onset strength, and harmonic/percussive balance, then
-  samples dense points at `--sample-step-s` seconds.
+  spectral centroid, onset strength, harmonic/percussive balance, spectral
+  contrast, and spectral change, then samples dense points at
+  `--sample-step-s` seconds.
 - It writes `model_version`, `sample_step_s`, model weights, derived
   `intensity`, and per-point `audio_features`.
-- Audio extraction emits `model_version="audio-features-librosa-v0.1"` by
-  default. Current weights are loudness 0.40, spectral centroid 0.20, onset
-  density 0.30, and percussive ratio 0.10.
+- Audio extraction emits `model_version="audio-features-librosa-v0.3-section-dynamics"`
+  by default. Current weights are loudness 0.34, spectral centroid 0.16,
+  onset density 0.22, percussive ratio 0.06, spectral contrast 0.14, and
+  spectral change 0.08.
+- Raw BPM is intentionally not a weighted intensity feature. Keep it in
+  `cue.bpm` for cadence guidance and display; use onset/beat strength and
+  local timbre-change features for musical intensity.
+- The F2 annotation loop is the model calibration path. `missed-intensity` and
+  `false-intensity` at exact timestamps are more useful than song-level
+  averages for training subjective climb / sprint / recovery feel.
 - `build_profile.py --youtube-url <url>` downloads audio with `yt-dlp` and then
   runs the same `librosa` path. Use `--work-dir` and `--keep-audio` while
   tuning so the download can be reused.
@@ -223,7 +233,8 @@ Local validation completed:
 - `node --test tests/*.test.mjs` passes: 44/44.
 - Synthetic WAV smoke test succeeded:
   `python tools\profile-builder\build_profile.py --audio C:\tmp\gizzerg-smoke.wav --out C:\tmp\gizzerg-smoke-curve.json --sample-step-s 1`
-  produced an `audio-features-librosa-v0.1` curve with dense points.
+  produced an `audio-features-librosa-v0.1` curve with dense points. Current
+  extraction emits `audio-features-librosa-v0.3-section-dynamics`.
 
 Next validation for Claude:
 
@@ -231,7 +242,7 @@ Next validation for Claude:
 cd C:\dev\roguERGlike\repos\concert-mvp
 python tools\profile-builder\build_profile.py `
   --youtube-url "https://www.youtube.com/watch?v=bnnIdWzGSYI" `
-  --out C:\tmp\bnnIdWzGSYI.audio-features-librosa-v0.1.json `
+  --out C:\tmp\bnnIdWzGSYI.audio-features-librosa-v0.3-section-dynamics.json `
   --sample-step-s 2 `
   --work-dir C:\tmp\gizzerg-profile-audio `
   --keep-audio
@@ -240,7 +251,7 @@ python tools\profile-builder\build_profile.py `
 Review the generated JSON before replacing the profile seed:
 
 - Confirm duration/point count roughly matches the YouTube video length.
-- Confirm `model_version` is `audio-features-librosa-v0.1`.
+- Confirm `model_version` is `audio-features-librosa-v0.3-section-dynamics`.
 - Check min/median/max intensity and a handful of high-intensity timestamps.
 - Compare peaks against obvious musical peaks and the 13:53 tracklist intro
   offset.

@@ -34,10 +34,12 @@ from collections.abc import Sequence
 from pathlib import Path
 
 DEFAULT_WEIGHTS = {
-    "loudness": 0.40,
-    "spectral_centroid": 0.20,
-    "onset_density": 0.30,
-    "percussive_ratio": 0.10,
+    "loudness": 0.34,
+    "spectral_centroid": 0.16,
+    "onset_density": 0.22,
+    "percussive_ratio": 0.06,
+    "spectral_contrast": 0.14,
+    "spectral_change": 0.08,
 }
 
 DEFAULT_WINDOW_S = 300.0  # 5-minute chunks for audio feature extraction
@@ -299,8 +301,11 @@ def extract_feature_doc_from_audio(
     raw_loudness: list[float] = []
     raw_centroid: list[float] = []
     raw_onset: list[float] = []
+    raw_spectral_contrast: list[float] = []
+    raw_spectral_change: list[float] = []
     harmonic_ratio: list[float] = []
     frame_times: list[float] = []
+    previous_centroid: float | None = None
 
     n_windows = max(1, math.ceil(duration_s / window_s))
     iterator = tqdm(
@@ -329,6 +334,13 @@ def extract_feature_doc_from_audio(
             y=y, sr=sr, hop_length=hop_length
         )[0]
         onset = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+        spectral_contrast = np.mean(
+            librosa.feature.spectral_contrast(y=y, sr=sr, hop_length=hop_length),
+            axis=0,
+        )
+        prepend_centroid = centroid[0] if previous_centroid is None else previous_centroid
+        spectral_change = np.abs(np.diff(centroid, prepend=prepend_centroid))
+        previous_centroid = float(centroid[-1])
         harmonic_y, percussive_y = librosa.effects.hpss(y)
         harmonic_rms = librosa.feature.rms(y=harmonic_y, hop_length=hop_length)[0]
         percussive_rms = librosa.feature.rms(y=percussive_y, hop_length=hop_length)[0]
@@ -337,6 +349,8 @@ def extract_feature_doc_from_audio(
             len(rms),
             len(centroid),
             len(onset),
+            len(spectral_contrast),
+            len(spectral_change),
             len(harmonic_rms),
             len(percussive_rms),
         )
@@ -354,6 +368,8 @@ def extract_feature_doc_from_audio(
         raw_loudness.extend(rms[:frame_count].tolist())
         raw_centroid.extend(centroid[:frame_count].tolist())
         raw_onset.extend(onset[:frame_count].tolist())
+        raw_spectral_contrast.extend(spectral_contrast[:frame_count].tolist())
+        raw_spectral_change.extend(spectral_change[:frame_count].tolist())
         harmonic_ratio.extend(ratio.tolist())
         frame_times.extend(global_times.tolist())
 
@@ -361,10 +377,17 @@ def extract_feature_doc_from_audio(
         raise ValueError("audio feature extraction produced no frames")
 
     frame_times_arr = np.asarray(frame_times)
+    smoothing_frames = max(1, round(sample_rate / hop_length))
     normalized_features = {
         "loudness": np.asarray(normalize_series(raw_loudness)),
         "spectral_centroid": np.asarray(normalize_series(raw_centroid)),
-        "onset_density": np.asarray(normalize_series(raw_onset)),
+        "onset_density": np.asarray(
+            normalize_series(raw_onset, log_scale=True, smooth_frames=smoothing_frames)
+        ),
+        "spectral_contrast": np.asarray(normalize_series(raw_spectral_contrast)),
+        "spectral_change": np.asarray(
+            normalize_series(raw_spectral_change, smooth_frames=smoothing_frames)
+        ),
         "harmonic_ratio": np.asarray(harmonic_ratio),  # already 0..1 by construction
     }
 
@@ -389,12 +412,18 @@ def extract_feature_doc_from_audio(
                 "harmonic_ratio": round(
                     float(np.mean(normalized_features["harmonic_ratio"][mask])), 4
                 ),
+                "spectral_contrast": round(
+                    float(np.mean(normalized_features["spectral_contrast"][mask])), 4
+                ),
+                "spectral_change": round(
+                    float(np.mean(normalized_features["spectral_change"][mask])), 4
+                ),
             }
         )
         t += sample_step_s
 
     return {
-        "model_version": model_version or "audio-features-librosa-v0.2-chunked",
+        "model_version": model_version or "audio-features-librosa-v0.3-section-dynamics",
         "source": f"audio:{audio_path.name}",
         "sample_step_s": sample_step_s,
         "points": points,
@@ -417,6 +446,8 @@ def build_curve(
             "spectral_centroid": normalized(point.get("spectral_centroid", 0)),
             "onset_density": normalized(point.get("onset_density", 0)),
             "harmonic_ratio": normalized(point.get("harmonic_ratio", 0)),
+            "spectral_contrast": normalized(point.get("spectral_contrast", 0)),
+            "spectral_change": normalized(point.get("spectral_change", 0)),
         }
         intensity = weighted_intensity(audio_features)
         out_points.append(
@@ -443,6 +474,8 @@ def weighted_intensity(features: dict) -> float:
         + features["spectral_centroid"] * DEFAULT_WEIGHTS["spectral_centroid"]
         + features["onset_density"] * DEFAULT_WEIGHTS["onset_density"]
         + percussive_ratio * DEFAULT_WEIGHTS["percussive_ratio"]
+        + features.get("spectral_contrast", 0) * DEFAULT_WEIGHTS["spectral_contrast"]
+        + features.get("spectral_change", 0) * DEFAULT_WEIGHTS["spectral_change"]
     )
     return clamp(raw, 0, 1.25)
 
@@ -451,7 +484,12 @@ def normalized(value: object) -> float:
     return clamp(number(value, "feature"), 0, 1)
 
 
-def normalize_series(values: Sequence[float]) -> list[float]:
+def normalize_series(
+    values: Sequence[float],
+    *,
+    log_scale: bool = False,
+    smooth_frames: int = 1,
+) -> list[float]:
     try:
         import numpy as np
     except ImportError as exc:
@@ -460,12 +498,33 @@ def normalize_series(values: Sequence[float]) -> list[float]:
     arr = np.asarray(values, dtype=float)
     if arr.size == 0:
         return []
+    if log_scale:
+        arr = np.log1p(np.maximum(arr, 0))
+    if smooth_frames > 1:
+        arr = smooth_series(arr, smooth_frames)
     lo = float(np.percentile(arr, 5))
     hi = float(np.percentile(arr, 95))
     if hi <= lo:
         return [0.0 for _ in arr]
     normalized_arr = np.clip((arr - lo) / (hi - lo), 0, 1)
     return [float(value) for value in normalized_arr]
+
+
+def smooth_series(values, width: int):
+    try:
+        import numpy as np
+    except ImportError as exc:
+        raise RuntimeError("smooth_series requires numpy") from exc
+
+    if width <= 1 or len(values) <= 1:
+        return np.asarray(values, dtype=float)
+    width = min(width, len(values))
+    kernel = np.ones(width, dtype=float) / width
+    arr = np.asarray(values, dtype=float)
+    left = width // 2
+    right = width - 1 - left
+    padded = np.pad(arr, (left, right), mode="edge")
+    return np.convolve(padded, kernel, mode="valid")
 
 
 def number(value: object, name: str) -> float:

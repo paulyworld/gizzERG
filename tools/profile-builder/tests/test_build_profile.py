@@ -26,8 +26,10 @@ class BuildProfileTests(unittest.TestCase):
         self.assertEqual(curve["sample_step_s"], 2)
         self.assertEqual([point["t"] for point in curve["points"]], [0.0, 2.0])
         self.assertEqual(curve["points"][0]["audio_features"]["loudness"], 0.5)
-        self.assertEqual(curve["points"][0]["intensity"], 0.55)
-        self.assertEqual(curve["points"][1]["intensity"], 0.4)
+        self.assertEqual(curve["points"][0]["audio_features"]["spectral_contrast"], 0)
+        self.assertEqual(curve["points"][0]["audio_features"]["spectral_change"], 0)
+        self.assertEqual(curve["points"][0]["intensity"], 0.42)
+        self.assertEqual(curve["points"][1]["intensity"], 0.34)
 
     def test_build_curve_rejects_missing_points(self):
         with self.assertRaisesRegex(ValueError, "non-empty points"):
@@ -52,6 +54,22 @@ class BuildProfileTests(unittest.TestCase):
             raise
 
         self.assertEqual(values, [0.0, 0.0, 0.0])
+
+    def test_normalize_series_can_log_scale_and_smooth_heavy_tails(self):
+        try:
+            values = build_profile.normalize_series(
+                [0, 0, 0, 1, 50, 1, 0, 0, 0],
+                log_scale=True,
+                smooth_frames=3,
+            )
+        except RuntimeError as exc:
+            if "requires numpy" in str(exc):
+                self.skipTest("numpy not installed")
+            raise
+
+        self.assertEqual(len(values), 9)
+        self.assertGreater(values[3], values[0])
+        self.assertGreater(values[4], values[3])
 
     def test_newest_downloaded_file_prefers_files_not_present_before(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -136,7 +154,14 @@ class BuildProfileTests(unittest.TestCase):
 
         # Each point's features should be in [0, 1].
         for p in points:
-            for k in ("loudness", "spectral_centroid", "onset_density", "harmonic_ratio"):
+            for k in (
+                "loudness",
+                "spectral_centroid",
+                "onset_density",
+                "harmonic_ratio",
+                "spectral_contrast",
+                "spectral_change",
+            ):
                 self.assertGreaterEqual(p[k], 0.0)
                 self.assertLessEqual(p[k], 1.0)
 
