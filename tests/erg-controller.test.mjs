@@ -32,6 +32,88 @@ test("large changes ramp instead of jumping immediately", () => {
   assert.equal(controller.targetAt(50).watts, 250);
 });
 
+test("raw feel can drive target power from selected derived intensity curve", () => {
+  const controller = new ErgWorkoutController({
+    ...profile,
+    derived_intensity_curve: {
+      model_version: "audio-test-v1",
+      points: [
+        { t: 0, intensity: 0.45 },
+        { t: 30, intensity: 0.80 },
+        { t: 60, intensity: 0.60 },
+      ],
+    },
+  }, { ftp: 250, intensitySource: "derived" });
+
+  const target = controller.targetAt(35);
+
+  assert.equal(target.watts, 200);
+  assert.equal(target.ftpPct, 0.8);
+  assert.equal(target.cadenceRpm, 100);
+  assert.equal(target.label, "hard");
+  assert.equal(target.intensitySource, "derived");
+});
+
+test("raw feel can blend authored cue intensity and selected derived intensity curve", () => {
+  const controller = new ErgWorkoutController({
+    ...profile,
+    derived_intensity_curve: {
+      model_version: "audio-test-v1",
+      points: [
+        { t: 0, intensity: 0.40 },
+        { t: 30, intensity: 0.80 },
+      ],
+    },
+  }, { ftp: 250, intensitySource: "blended", intensityBlend: 0.5 });
+
+  const target = controller.targetAt(35);
+
+  assert.equal(target.watts, 172);
+  assert.equal(Math.round(target.ftpPct * 1000), 689);
+  assert.equal(target.intensitySource, "blended");
+});
+
+test("authored cue source preserves existing ramp behavior", () => {
+  const controller = new ErgWorkoutController({
+    ...profile,
+    derived_intensity_curve: {
+      model_version: "audio-test-v1",
+      points: [
+        { t: 0, intensity: 0.50 },
+        { t: 30, intensity: 1.00 },
+      ],
+    },
+  }, { ftp: 250, intensitySource: "cues" });
+
+  assert.equal(controller.targetAt(40).watts, 188);
+  assert.equal(controller.targetAt(40).intensitySource, "cues");
+});
+
+test("raw feel can use sampled terrain intensity for target power", () => {
+  const controller = new ErgWorkoutController({
+    ...profile,
+    derived_intensity_curve: {
+      model_version: "audio-test-v1",
+      points: [
+        { t: 0, intensity: 0.40 },
+        { t: 30, intensity: 0.80 },
+      ],
+    },
+  }, {
+    ftp: 250,
+    intensitySource: "derived",
+    intensitySeries: [
+      { t: 0, intensity: 0.50 },
+      { t: 20, intensity: 0.60 },
+      { t: 40, intensity: 0.70 },
+    ],
+  });
+
+  assert.equal(controller.targetAt(35).watts, 150);
+  assert.equal(controller.targetAt(35).ftpPct, 0.60);
+  assert.equal(controller.targetAt(45).watts, 175);
+});
+
 test("targets clamp to configured maximum", () => {
   const controller = new ErgWorkoutController(profile, { ftp: 400, maxWatts: 300 });
 

@@ -12,7 +12,7 @@ test("concert profile exposes selectable video and curve options", () => {
   assert.ok(Array.isArray(profile.available_intensity_curves));
   assert.deepEqual(
     profile.available_intensity_curves.map((curve) => curve.id),
-    ["manual-seed", "audio-v0.3-20m"],
+    ["manual-seed", "audio-v0.3-20m", "audio-v0.4-subjective-20m"],
   );
   assert.equal(profile.derived_intensity_curve.model_version, "manual-seed-v0.1");
 });

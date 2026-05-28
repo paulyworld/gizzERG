@@ -4,9 +4,23 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>roguERGlike Concert ERG</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=timeline-tall-1">
 </head>
 <body>
+  <script>
+    window.addEventListener("error", (event) => {
+      const target = document.querySelector("#player") || document.body;
+      target.textContent = `App startup error: ${event.message}`;
+      target.style.color = "#ffb4b4";
+      target.style.padding = "16px";
+    });
+    window.addEventListener("unhandledrejection", (event) => {
+      const target = document.querySelector("#player") || document.body;
+      target.textContent = `App startup error: ${event.reason?.message ?? event.reason}`;
+      target.style.color = "#ffb4b4";
+      target.style.padding = "16px";
+    });
+  </script>
   <main class="shell">
     <section class="video-panel" aria-label="Concert player">
       <div class="video-stage">
@@ -25,11 +39,41 @@
               <input id="blendedIntensityToggle" type="checkbox" checked>
               intensity
             </label>
+            <label class="chart-range-control">
+              <span>range</span>
+              <select id="chartRangeSelect"></select>
+            </label>
             <label class="timeline-seek-toggle">
               <input id="timelineSeekToggle" type="checkbox">
               seek
             </label>
+            <label class="timeline-seek-toggle">
+              <input id="chartSelectionToggle" type="checkbox">
+              select
+            </label>
+            <label class="timeline-seek-toggle">
+              <input id="songZoomToggle" type="checkbox">
+              song
+            </label>
+            <label class="timeline-seek-toggle">
+              <input id="chartTallToggle" type="checkbox">
+              tall
+            </label>
           </span>
+          </div>
+          <div id="chartRangeLabel" class="chart-range-label">Showing full ride</div>
+          <div id="chartSelectionControls" class="chart-selection-controls" hidden>
+            <label>
+              <span>Start</span>
+              <input id="chartStartSlider" type="range" min="0" max="3600" value="833" step="1">
+              <output id="chartStartOut">13:53</output>
+            </label>
+            <label>
+              <span>End</span>
+              <input id="chartEndSlider" type="range" min="0" max="3600" value="2033" step="1">
+              <output id="chartEndOut">33:53</output>
+            </label>
+            <button id="applyChartSelection" type="button">Zoom</button>
           </div>
           <canvas id="rideChart" height="210"></canvas>
           <div id="songStrip" class="song-strip" aria-label="Song timeline"></div>
@@ -56,11 +100,16 @@
       <div class="settings">
         <label>
           <span>Video</span>
-          <select id="profileSelect"></select>
+          <select id="profileSelect">
+            <option value="0">King Gizzard - Live in Greece '25 Night 2</option>
+          </select>
         </label>
         <label>
           <span>Curve</span>
-          <select id="curveSelect"></select>
+          <select id="curveSelect">
+            <option value="manual-seed">Manual seed</option>
+            <option value="audio-v0.3-20m">Audio v0.3 preview (13:53-33:53)</option>
+          </select>
         </label>
         <label>
           <span>FTP</span>
@@ -257,6 +306,6 @@
     </div>
   </div>
 
-  <script type="module" src="src/app.js"></script>
+  <script type="module" src="src/app.js?v=annotation-notes-1"></script>
 </body>
 </html>

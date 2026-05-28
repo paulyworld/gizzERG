@@ -1,4 +1,5 @@
 import { bnnIdWzGSYISectionDynamics20m } from "../audio-derived-curves.js";
+import { buildSubjectiveFeelCurve } from "../subjective-intensity.js";
 
 export const bnnIdWzGSYIManualSeedCurve = {
   model_version: "manual-seed-v0.1",
@@ -49,6 +50,25 @@ export const bnnIdWzGSYISectionDynamics20mPreview = {
   ].sort((a, b) => a.t - b.t),
 };
 
+const bnnIdWzGSYISubjective20m = buildSubjectiveFeelCurve(bnnIdWzGSYISectionDynamics20m, {
+  modelVersion: "audio-features-librosa-v0.4-subjective-feel-preview-20m",
+  note: "Preview curve for app review. Starts from v0.3 audio features, then applies local contrast, musical pressure, light style priors, and smooth-vocal release terms to better separate metal pressure from smoother peaks.",
+  styleSegments: [
+    { start_s: 833, end_s: 1119, pressure: 0.45, label: "metal" },
+    { start_s: 1119, end_s: 1795, pressure: 0.45, label: "metal" },
+  ],
+});
+
+export const bnnIdWzGSYISubjective20mPreview = {
+  ...bnnIdWzGSYISubjective20m,
+  source: "audio:bnnIdWzGSYI video 13:53-33:53 v0.4 subjective preview plus manual seed outside sample",
+  points: [
+    ...bnnIdWzGSYIManualSeedCurve.points.filter((point) => point.t < 833),
+    ...bnnIdWzGSYISubjective20m.points,
+    ...bnnIdWzGSYIManualSeedCurve.points.filter((point) => point.t > 2033),
+  ].sort((a, b) => a.t - b.t),
+};
+
 export const intensityCurveLibrary = {
   bnnIdWzGSYI: [
     {
@@ -60,6 +80,11 @@ export const intensityCurveLibrary = {
       id: "audio-v0.3-20m",
       label: "Audio v0.3 preview (13:53-33:53)",
       curve: bnnIdWzGSYISectionDynamics20mPreview,
+    },
+    {
+      id: "audio-v0.4-subjective-20m",
+      label: "Audio v0.4 subjective preview (13:53-33:53)",
+      curve: bnnIdWzGSYISubjective20mPreview,
     },
   ],
 };

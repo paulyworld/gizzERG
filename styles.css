@@ -137,6 +137,66 @@ button:hover {
   height: 14px;
 }
 
+.chart-range-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+
+.chart-range-control select {
+  min-height: 26px;
+  max-width: 96px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.chart-range-label {
+  min-height: 14px;
+  color: rgba(167, 175, 188, 0.86);
+  font-size: 11px;
+  line-height: 1.2;
+  margin: -1px 0 4px 44px;
+}
+
+.chart-selection-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin: 2px 54px 6px 44px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chart-selection-controls label {
+  display: grid;
+  grid-template-columns: auto minmax(80px, 1fr) 44px;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.chart-selection-controls input {
+  min-width: 0;
+}
+
+.chart-selection-controls output {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.chart-selection-controls button {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .terrain-reset-button {
   width: 100%;
   min-height: 30px;
@@ -150,10 +210,27 @@ button:hover {
   cursor: pointer;
 }
 
+.song-zoom-enabled .song-segment {
+  cursor: pointer;
+}
+
+.song-zoom-enabled .song-segment:hover {
+  outline: 2px solid rgba(255, 255, 255, 0.72);
+  outline-offset: -2px;
+}
+
 #rideChart {
   display: block;
   width: 100%;
   height: 150px;
+}
+
+.ride-chart-panel.tall #rideChart {
+  height: 320px;
+}
+
+.ride-chart-panel.tall {
+  max-height: calc(100% - 20px);
 }
 
 .song-strip {
