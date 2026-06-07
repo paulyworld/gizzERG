@@ -3,7 +3,7 @@
 > Browser-based ERG controller experiment for the YouTube concert ride.
 
 **Last updated:** 2026-06-06
-**Current branch:** `feat/full-concert-curves-tuning-controls`
+**Current branch:** `feat/music-end-detection` (off `feat/full-concert-curves-tuning-controls`)
 **Current focus:** Music-intensity review and tuning UI for gizzERG. The app
 now supports selectable curve versions, a v0.4 subjective-feel curve,
 zoomable/tall timeline review, sidecar-backed F2 annotations, and Raw Feel
@@ -22,6 +22,27 @@ Raw Feel uses `Derived intensity` or `Blended`.
 | **Intensity smoothing slider** | New 0-60s symmetric centered moving-average. Default off (preserves extrema). Applied at `derivedIntensityPoints()` so it affects chart overlay, controller target series, F2 annotation context, *and* the BPM line — single knob, consistent everywhere. |
 | **Authored Cues chart overlay** | New `cues` toggle in the chart header. Renders `profile.cues` as a rose-magenta step line on the same power-axis as the cyan derived overlay. Lets you compare authored / derived / blended at a glance while tuning the blend slider. |
 | **Curve dropdown persistence** | LocalStorage-keyed per video id (`gizzERG:curveSelection:<videoId>`). Falls back to first option gracefully when the stored id no longer exists. Boot-time init reorder fixed: `activateSelectedProfile({ reloadVideo: false })` now runs after `populateCurveSelect()` so the restored choice *actually loads* (was a dropdown-only restore before). |
+
+**2026-06-06 follow-up — per-song music-end detection landed:**
+
+- `tools/analyze-music-end.mjs` walks `bnnIdWzGSYIAudioFeaturesFull` and uses a smoothed-loudness threshold (≥0.20 over an 8s symmetric window) plus a 6s trailing-quiet hold to find where music actually ends within each authored song window. Validated against the rider's F2 anchor for Motor Spirit (detected 1777 vs rider 1775.9 — 1.1s diff, within 2s sample-step resolution).
+- `src/library/videos.js` — `music_end_offset_s` baked into 6 of 16 Night-2 tracks. Other 10 are continuous live segues (verified via spot-check on Gila→Motor Spirit, I'm in Your Mind suite, Iron Lung→Evil Death Roll — loudness stays high through transitions).
+- `src/erg-controller.js` — `targetAt()` detects break gaps via new `_breakGapAt(time)`. Inside a gap, returns an easy-spin target (`pauseFtpPct`, `pauseCadenceRpm`), labels it `<track> → break`, sets `inBreakGap: true` + `intensitySource: "break-gap"`, attaches the `breakGap: { from, to, trackTitle }` window for downstream consumers. Trainer command also drops automatically.
+- BPM line (`drawMusicBpmCurve`) skips drawing during gaps — break in the line is the visual signal. Guidance text + hover tooltip both show "between songs (break)" instead of holding stale per-section BPM.
+- 4 new controller tests cover gap detection, normal target outside gaps, resumption after gaps, and continuous-segue songs (no gap field → no override).
+
+Detected gaps (validated where rider notes exist):
+
+| Song | authored end | music end | gap | source |
+|---|---|---|---|---|
+| Motor Spirit | 1795 | 1777 | 18s | rider F2 confirmed |
+| The Balrog | 3233 | 3203 | 30s | auto-detected |
+| Sad Pilot | 4004 | 3981 | 23s | auto-detected |
+| The Bitter Boogie | 6525 | 6509 | 16s | auto-detected |
+| Hog Calling Contest | 6799 | 6791 | 8s | auto-detected |
+| Set | 8753 | 8719 | 34s | auto-detected (end-of-show applause) |
+
+The detector is conservative: requires ≥6s of sustained low loudness, so brief instrumental dips inside a song don't false-trigger. Re-run `node tools/analyze-music-end.mjs` after any audio re-extraction; bake new offsets into `videos.js` manually based on the output table.
 
 ## ⚠️ Known UX gotcha (gizzERG issue #4)
 

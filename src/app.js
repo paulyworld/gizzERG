@@ -734,8 +734,13 @@ function renderTarget(target) {
   renderPowerCadenceMetric(target);
   els.targetPct.textContent = `${Math.round(target.ftpPct * 100)}%`;
   els.sectionLabel.textContent = target.label;
-  const liveBpm = audioBpmAt(latestVideoTime);
-  const bpmText = liveBpm != null ? `${Math.round(liveBpm)} music BPM` : `${target.musicBpm} music BPM`;
+  let bpmText;
+  if (target.inBreakGap) {
+    bpmText = "between songs (break)";
+  } else {
+    const liveBpm = audioBpmAt(latestVideoTime);
+    bpmText = liveBpm != null ? `${Math.round(liveBpm)} music BPM` : `${target.musicBpm} music BPM`;
+  }
   els.guidanceText.textContent = `${target.modeLabel}: ${bpmText}, ride ${target.cadenceRpm} rpm, ${target.wkg.toFixed(2)} W/kg target.`;
   renderTerrainSummary();
   const track = trackAt(latestVideoTime);
@@ -1321,12 +1326,23 @@ function drawCadenceCurve(ctx, plotLeft, plotWidth, area, minCadence, maxCadence
 function drawMusicBpmCurve(ctx, plotLeft, plotWidth, area, minMusicBpm, maxMusicBpm) {
   const chartWindow = currentChartWindow();
   ctx.beginPath();
+  let penDown = false;
   for (let x = plotLeft; x <= plotLeft + plotWidth; x += 4) {
     const time = xToTimeInWindow(x, plotLeft, plotWidth, chartWindow);
-    const bpm = audioBpmAt(time) ?? controller.targetAt(time).musicBpm;
+    const target = controller.targetAt(time);
+    // Hide the BPM line during music-end break gaps: "applause BPM" from
+    // librosa's tempogram during banter/clapping isn't musically meaningful
+    // and holding the per-section value through silence is the bug we're
+    // fixing. The line picks back up at the next song's start.
+    if (target.inBreakGap) {
+      penDown = false;
+      continue;
+    }
+    const bpm = audioBpmAt(time) ?? target.musicBpm;
     const y = musicBpmToY(bpm, area, minMusicBpm, maxMusicBpm);
-    if (x === plotLeft) {
+    if (!penDown) {
       ctx.moveTo(x, y);
+      penDown = true;
     } else {
       ctx.lineTo(x, y);
     }
@@ -1812,7 +1828,11 @@ function updateRideChartTooltip(event, time) {
     <span>Song: ${track ? `${track.index + 1}. ${escapeHtml(track.title)}` : "not aligned"}</span>
     <span>Target: ${target.watts} W (${Math.round(target.ftpPct * 100)}% FTP), ${target.cadenceRpm} rpm</span>
     <span>Mode: ${escapeHtml(target.modeLabel ?? "Workout")}${target.planBlock ? ` / ${escapeHtml(target.planBlock)}` : ""}</span>
-    <span>Music BPM: ${(() => { const b = audioBpmAt(time); return b != null ? `${Math.round(b)} (per-window)` : `${target.musicBpm} (per-section)`; })()}</span>
+    <span>Music BPM: ${(() => {
+      if (target.inBreakGap) return "between songs (break)";
+      const b = audioBpmAt(time);
+      return b != null ? `${Math.round(b)} (per-window)` : `${target.musicBpm} (per-section)`;
+    })()}</span>
     <span>${derivedIntensityLabel()}: ${derived ? `${Math.round(derived.intensity * 100)}%` : "not available"}</span>
     <span>Terrain source: ${escapeHtml(terrainSourceDisplayLabel())}</span>
     <span>Blended terrain intensity: ${Math.round(blendedIntensity * 100)}%</span>
