@@ -304,6 +304,11 @@ def extract_feature_doc_from_audio(
     raw_spectral_contrast: list[float] = []
     raw_spectral_change: list[float] = []
     harmonic_ratio: list[float] = []
+    # Per-frame BPM. Kept separate from the weighted-intensity features
+    # because BPM is an absolute musical value, not a 0-1 normalized signal.
+    # Emitted as `bpm` per point so the chart can render real per-window
+    # tempo instead of the constant `cue.bpm` held between authored cues.
+    raw_tempo: list[float] = []
     frame_times: list[float] = []
     previous_centroid: float | None = None
 
@@ -344,6 +349,12 @@ def extract_feature_doc_from_audio(
         harmonic_y, percussive_y = librosa.effects.hpss(y)
         harmonic_rms = librosa.feature.rms(y=harmonic_y, hop_length=hop_length)[0]
         percussive_rms = librosa.feature.rms(y=percussive_y, hop_length=hop_length)[0]
+        # Per-frame tempo from the tempogram. aggregate=None gives one BPM
+        # estimate per frame (same hop_length grid as the other features),
+        # which is what we need for a dynamic tempo line on the chart.
+        tempo_per_frame = librosa.feature.tempo(
+            y=y, sr=sr, hop_length=hop_length, aggregate=None,
+        )
 
         frame_count = min(
             len(rms),
@@ -353,6 +364,7 @@ def extract_feature_doc_from_audio(
             len(spectral_change),
             len(harmonic_rms),
             len(percussive_rms),
+            len(tempo_per_frame),
         )
         if frame_count == 0:
             continue
@@ -371,6 +383,7 @@ def extract_feature_doc_from_audio(
         raw_spectral_contrast.extend(spectral_contrast[:frame_count].tolist())
         raw_spectral_change.extend(spectral_change[:frame_count].tolist())
         harmonic_ratio.extend(ratio.tolist())
+        raw_tempo.extend(tempo_per_frame[:frame_count].tolist())
         frame_times.extend(global_times.tolist())
 
     if not frame_times:
@@ -390,6 +403,9 @@ def extract_feature_doc_from_audio(
         ),
         "harmonic_ratio": np.asarray(harmonic_ratio),  # already 0..1 by construction
     }
+    # BPM stays in absolute units (not percentile-normalized) — it's a real
+    # musical value, not a relative intensity signal.
+    tempo_arr = np.asarray(raw_tempo, dtype=float)
 
     points = []
     t = 0.0
@@ -418,6 +434,7 @@ def extract_feature_doc_from_audio(
                 "spectral_change": round(
                     float(np.mean(normalized_features["spectral_change"][mask])), 4
                 ),
+                "bpm": round(float(np.mean(tempo_arr[mask])), 1),
             }
         )
         t += sample_step_s
@@ -449,6 +466,16 @@ def build_curve(
             "spectral_contrast": normalized(point.get("spectral_contrast", 0)),
             "spectral_change": normalized(point.get("spectral_change", 0)),
         }
+        # BPM passes through in absolute units; older feature JSON without a
+        # bpm field stays valid (we just omit the key in those points).
+        bpm = point.get("bpm")
+        if bpm is not None:
+            try:
+                bpm_value = float(bpm)
+                if math.isfinite(bpm_value) and bpm_value > 0:
+                    audio_features["bpm"] = round(bpm_value, 1)
+            except (TypeError, ValueError):
+                pass
         intensity = weighted_intensity(audio_features)
         out_points.append(
             {

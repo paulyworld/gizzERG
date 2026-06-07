@@ -5,8 +5,17 @@ import {
   buildContextSnapshot,
   presetForHotkey,
 } from "./annotations.js";
-import { concertProfiles } from "./concert-profile.js";
-import { ErgWorkoutController, formatTime, targetMaintained } from "./erg-controller.js";
+import { concertProfiles } from "./concert-profile.js?v=subjective-v0.4-1";
+import { ErgWorkoutController, formatTime, targetMaintained } from "./erg-controller.js?v=sampled-targets-1";
+import { applySymmetricSmoothing, buildExtremaPreservingSeries } from "./intensity-sampling.js";
+import {
+  CHART_RANGE_OPTIONS,
+  chartWindowFor,
+  customChartWindow,
+  overlapsWindow,
+  timeToXInWindow,
+  xToTimeInWindow,
+} from "./chart-window.js";
 import {
   blendTerrainIntensityAt,
   estimateSpeedMps,
@@ -16,8 +25,8 @@ import {
 import { estimatePlannedWorkout, summarizeCompliance, summarizeRideSamples } from "./workout-analysis.js";
 import { workoutModes } from "./workout-patterns.js";
 
-const profile = concertProfiles[0];
-const controller = new ErgWorkoutController(profile);
+let profile = concertProfiles[0];
+let controller = new ErgWorkoutController(profile);
 const TERRAIN_TUNING_HELP = {
   terrainSourceSelect: "Blended starts from the derived curve, pulls toward authored cues, and applies terrain overrides. Derived and authored isolate each source.",
   terrainBlend: "Default 65% derived. Lower values trust authored cues more; higher values trust the dense derived curve more.",
@@ -56,7 +65,23 @@ const els = {
   timelineSeekToggle: document.querySelector("#timelineSeekToggle"),
   songDivisionsToggle: document.querySelector("#songDivisionsToggle"),
   blendedIntensityToggle: document.querySelector("#blendedIntensityToggle"),
+  authoredCuesToggle: document.querySelector("#authoredCuesToggle"),
+  chartRangeSelect: document.querySelector("#chartRangeSelect"),
+  chartRangeLabel: document.querySelector("#chartRangeLabel"),
+  chartSelectionToggle: document.querySelector("#chartSelectionToggle"),
+  songZoomToggle: document.querySelector("#songZoomToggle"),
+  chartTallToggle: document.querySelector("#chartTallToggle"),
+  chartSelectionControls: document.querySelector("#chartSelectionControls"),
+  chartStartSlider: document.querySelector("#chartStartSlider"),
+  chartStartOut: document.querySelector("#chartStartOut"),
+  chartEndSlider: document.querySelector("#chartEndSlider"),
+  chartEndOut: document.querySelector("#chartEndOut"),
+  applyChartSelection: document.querySelector("#applyChartSelection"),
   songStrip: document.querySelector("#songStrip"),
+  profileSelect: document.querySelector("#profileSelect"),
+  curveSelect: document.querySelector("#curveSelect"),
+  intensitySmoothing: document.querySelector("#intensitySmoothing"),
+  intensitySmoothingOut: document.querySelector("#intensitySmoothingOut"),
   ftpInput: document.querySelector("#ftpInput"),
   workoutModeSelect: document.querySelector("#workoutModeSelect"),
   weightInput: document.querySelector("#weightInput"),
@@ -136,12 +161,18 @@ const rideSamples = [];
 const annotations = [];
 let annotationFocusRestore = null;
 let terrainRoute = buildTerrainRoute();
+let customChartSelection = defaultCustomChartSelection();
 
-els.profileTitle.textContent = profile.title;
-els.seekSlider.max = String(profile.duration_s);
-els.trackOffsetInput.value = formatDurationInput(profile.tracklist_intro_offset_s ?? 0);
-els.warmupDurationInput.value = formatDurationInput(profile.tracklist_intro_offset_s ?? 15 * 60);
-els.trackSourceText.textContent = `${profile.tracklist_source?.name ?? "Tracklist"} song bands. Adjust offset if the video has an intro.`;
+populateChartRangeSelect();
+populateProfileSelect();
+populateCurveSelect();
+syncIntensitySmoothingOutput();
+// populateCurveSelect restored the dropdown to the persisted choice, but
+// profile/controller above were built with the default curve. Activate now
+// so the restored selection actually loads — otherwise the dropdown shows
+// the right thing while the loaded curve is still the default.
+activateSelectedProfile({ reloadVideo: false });
+renderProfileMetadata({ resetTimingInputs: true });
 for (const mode of workoutModes) {
   const option = document.createElement("option");
   option.value = mode.id;
@@ -149,6 +180,7 @@ for (const mode of workoutModes) {
   option.title = mode.description;
   els.workoutModeSelect.append(option);
 }
+syncControllerIntensitySource();
 renderTimeline();
 renderSongStrip();
 renderTarget(controller.targetAt(0));
@@ -165,6 +197,42 @@ els.timelineSeekToggle.addEventListener("change", () => {
 });
 els.songDivisionsToggle.addEventListener("change", drawRideChart);
 els.blendedIntensityToggle.addEventListener("change", drawRideChart);
+els.authoredCuesToggle.addEventListener("change", drawRideChart);
+els.chartRangeSelect.addEventListener("change", () => {
+  renderSongStrip();
+  drawRideChart();
+});
+els.chartSelectionToggle.addEventListener("change", () => {
+  els.chartSelectionControls.hidden = !els.chartSelectionToggle.checked;
+  els.rideChart.parentElement.classList.toggle("chart-select-enabled", els.chartSelectionToggle.checked);
+  syncChartSelectionControls();
+  drawRideChart();
+});
+els.songZoomToggle.addEventListener("change", () => {
+  els.rideChart.parentElement.classList.toggle("song-zoom-enabled", els.songZoomToggle.checked);
+});
+els.chartTallToggle.addEventListener("change", () => {
+  els.rideChart.parentElement.classList.toggle("tall", els.chartTallToggle.checked);
+  drawRideChart();
+});
+for (const input of [els.chartStartSlider, els.chartEndSlider]) {
+  input.addEventListener("input", () => {
+    syncChartSelectionOutputs();
+    drawRideChart();
+  });
+}
+els.applyChartSelection.addEventListener("click", () => {
+  const next = customChartWindow(
+    Number(els.chartStartSlider.value),
+    Number(els.chartEndSlider.value),
+    profile.duration_s,
+  );
+  customChartSelection = { startS: next.startS, endS: next.endS };
+  els.chartRangeSelect.value = "custom";
+  syncChartSelectionControls();
+  renderSongStrip();
+  drawRideChart();
+});
 loadYouTubeApi()
   .then(createPlayer)
   .catch((error) => {
@@ -189,6 +257,22 @@ els.seekSlider.addEventListener("change", () => {
   tick(true);
 });
 els.connectButton.addEventListener("click", connectSidecar);
+els.profileSelect.addEventListener("change", () => {
+  populateCurveSelect();
+  activateSelectedProfile({ reloadVideo: true });
+});
+els.curveSelect.addEventListener("change", () => {
+  persistCurveSelection();
+  activateSelectedProfile({ reloadVideo: false });
+});
+els.intensitySmoothing.addEventListener("input", () => {
+  syncIntensitySmoothingOutput();
+  syncControllerIntensitySource();
+  controller.resetWrites();
+  renderTarget(controller.targetAt(latestVideoTime));
+  drawRideChart();
+  tick(true);
+});
 
 for (const input of [els.ftpInput, els.weightInput, els.maxTargetInput]) {
   input.addEventListener("input", () => {
@@ -225,10 +309,14 @@ els.trackOffsetInput.addEventListener("input", () => {
 for (const input of terrainInputs()) {
   input.addEventListener("input", () => {
     terrainRoute = buildTerrainRoute();
+    syncControllerIntensitySource();
+    controller.resetWrites();
     renderTerrainTuning();
     renderTerrainSummary();
     drawRideChart();
     updateAnalysis();
+    renderTarget(controller.targetAt(latestVideoTime));
+    tick(true);
   });
 }
 els.resetTerrainTuning.addEventListener("click", resetTerrainTuning);
@@ -279,6 +367,173 @@ function createPlayer(YTApi) {
       onError: onPlayerError,
     },
   });
+}
+
+function populateChartRangeSelect() {
+  els.chartRangeSelect.replaceChildren();
+  for (const optionConfig of CHART_RANGE_OPTIONS) {
+    const option = document.createElement("option");
+    option.value = optionConfig.id;
+    option.textContent = optionConfig.label;
+    els.chartRangeSelect.append(option);
+  }
+  els.chartRangeSelect.value = "full";
+  syncChartSelectionControls();
+}
+
+function syncChartSelectionControls() {
+  const max = Math.max(1, Math.round(profile.duration_s));
+  for (const slider of [els.chartStartSlider, els.chartEndSlider]) {
+    slider.max = String(max);
+  }
+  els.chartStartSlider.value = String(Math.round(Math.min(customChartSelection.startS, max)));
+  els.chartEndSlider.value = String(Math.round(Math.min(customChartSelection.endS, max)));
+  syncChartSelectionOutputs();
+}
+
+function syncChartSelectionOutputs() {
+  const start = Number(els.chartStartSlider.value);
+  const end = Number(els.chartEndSlider.value);
+  els.chartStartOut.textContent = formatTime(Math.min(start, end));
+  els.chartEndOut.textContent = formatTime(Math.max(start, end));
+}
+
+function populateProfileSelect() {
+  els.profileSelect.innerHTML = "";
+  for (const [index, candidate] of concertProfiles.entries()) {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = candidate.title;
+    els.profileSelect.append(option);
+  }
+  els.profileSelect.value = "0";
+}
+
+function curveOptionsFor(candidate) {
+  const options = Array.isArray(candidate.available_intensity_curves)
+    ? candidate.available_intensity_curves
+    : [];
+  if (options.length > 0) {
+    return options;
+  }
+  return [
+    {
+      id: "default",
+      label: candidate.derived_intensity_curve?.model_version ?? "Default curve",
+      curve: candidate.derived_intensity_curve,
+    },
+  ];
+}
+
+function populateCurveSelect() {
+  const baseProfile = concertProfiles[Number(els.profileSelect.value) || 0] ?? concertProfiles[0];
+  els.curveSelect.innerHTML = "";
+  const options = curveOptionsFor(baseProfile);
+  for (const optionConfig of options) {
+    const option = document.createElement("option");
+    option.value = optionConfig.id;
+    option.textContent = optionConfig.label;
+    option.title = optionConfig.curve?.note ?? optionConfig.curve?.model_version ?? "";
+    els.curveSelect.append(option);
+  }
+  const stored = readStoredCurveSelection(baseProfile.video_id);
+  const fallback = options[0]?.id ?? "default";
+  const initial = stored && options.some((o) => o.id === stored) ? stored : fallback;
+  els.curveSelect.value = initial;
+}
+
+function curveSelectionStorageKey(videoId) {
+  return `gizzERG:curveSelection:${videoId ?? "default"}`;
+}
+
+function readStoredCurveSelection(videoId) {
+  try {
+    return window.localStorage?.getItem(curveSelectionStorageKey(videoId));
+  } catch {
+    return null;
+  }
+}
+
+function persistCurveSelection() {
+  const baseProfile = concertProfiles[Number(els.profileSelect.value) || 0] ?? concertProfiles[0];
+  try {
+    window.localStorage?.setItem(
+      curveSelectionStorageKey(baseProfile?.video_id),
+      els.curveSelect.value,
+    );
+  } catch {
+    // ignore — localStorage may be disabled
+  }
+}
+
+function selectedProfile() {
+  const baseProfile = concertProfiles[Number(els.profileSelect.value) || 0] ?? concertProfiles[0];
+  const curveOption = curveOptionsFor(baseProfile).find((option) => option.id === els.curveSelect.value)
+    ?? curveOptionsFor(baseProfile)[0];
+  return {
+    ...baseProfile,
+    version: curveOption?.id ? `${baseProfile.version}:${curveOption.id}` : baseProfile.version,
+    derived_intensity_curve: curveOption?.curve ?? baseProfile.derived_intensity_curve,
+  };
+}
+
+function activateSelectedProfile({ reloadVideo = false } = {}) {
+  const previousVideoId = profile.video_id;
+  profile = selectedProfile();
+  controller = new ErgWorkoutController(profile);
+  controller.setRider({
+    ftp: els.ftpInput.value,
+    weightKg: els.weightInput.value,
+    maxWatts: els.maxTargetInput.value,
+  });
+  controller.setMode({
+    modeId: els.workoutModeSelect.value,
+    warmupMinutes: parseDurationInput(els.warmupDurationInput.value, 15 * 60) / 60,
+  });
+  latestVideoTime = Math.min(latestVideoTime, profile.duration_s);
+  els.seekSlider.value = String(Math.round(latestVideoTime));
+  customChartSelection = defaultCustomChartSelection();
+  syncChartSelectionControls();
+  currentSongKey = "";
+  terrainRoute = buildTerrainRoute();
+  syncControllerIntensitySource();
+  renderProfileMetadata({ resetTimingInputs: reloadVideo });
+  clearRideSamples();
+  renderTimeline();
+  renderSongStrip();
+  renderTerrainSummary();
+  renderTarget(controller.targetAt(latestVideoTime));
+  updateClock();
+  drawRideChart();
+  if (reloadVideo && player && previousVideoId !== profile.video_id) {
+    player.loadVideoById(profile.video_id);
+  }
+}
+
+function defaultCustomChartSelection() {
+  const start = Math.max(0, Math.min(profile.tracklist_intro_offset_s ?? 0, profile.duration_s));
+  return {
+    startS: start,
+    endS: Math.min(profile.duration_s, start + 20 * 60),
+  };
+}
+
+function renderProfileMetadata({ resetTimingInputs = false } = {}) {
+  els.profileTitle.textContent = profile.title;
+  videoDuration = profile.duration_s;
+  els.seekSlider.max = String(profile.duration_s);
+  if (resetTimingInputs) {
+    els.trackOffsetInput.value = formatDurationInput(profile.tracklist_intro_offset_s ?? 0);
+    els.warmupDurationInput.value = formatDurationInput(profile.tracklist_intro_offset_s ?? 15 * 60);
+  }
+  const curveLabel = selectedCurveLabel();
+  els.trackSourceText.textContent = `${profile.tracklist_source?.name ?? "Tracklist"} song bands. Curve: ${curveLabel}.`;
+}
+
+function selectedCurveLabel() {
+  return els.curveSelect.selectedOptions[0]?.textContent
+    ?? profile.derived_intensity_curve?.model_version
+    ?? "default";
 }
 
 function onPlayerReady() {
@@ -410,6 +665,9 @@ function tick(force) {
   renderTarget(decision.target);
   updateClock();
   sampleRideChart(decision.target);
+  if (els.chartRangeSelect.value !== "full") {
+    renderSongStrip();
+  }
   drawRideChart();
   updateAnalysis();
 
@@ -476,7 +734,9 @@ function renderTarget(target) {
   renderPowerCadenceMetric(target);
   els.targetPct.textContent = `${Math.round(target.ftpPct * 100)}%`;
   els.sectionLabel.textContent = target.label;
-  els.guidanceText.textContent = `${target.modeLabel}: ${target.musicBpm} music BPM, ride ${target.cadenceRpm} rpm, ${target.wkg.toFixed(2)} W/kg target.`;
+  const liveBpm = audioBpmAt(latestVideoTime);
+  const bpmText = liveBpm != null ? `${Math.round(liveBpm)} music BPM` : `${target.musicBpm} music BPM`;
+  els.guidanceText.textContent = `${target.modeLabel}: ${bpmText}, ride ${target.cadenceRpm} rpm, ${target.wkg.toFixed(2)} W/kg target.`;
   renderTerrainSummary();
   const track = trackAt(latestVideoTime);
   els.trackLabel.textContent = track
@@ -499,6 +759,47 @@ function renderPowerCadenceMetric(target) {
 
 function buildTerrainRoute() {
   return sampleTerrainRoute(profile, terrainOptions());
+}
+
+function syncControllerIntensitySource() {
+  if (typeof controller.setIntensitySource !== "function") {
+    console.warn("ErgWorkoutController.setIntensitySource unavailable; refresh cached modules.");
+    return;
+  }
+  controller.setIntensitySource({
+    intensitySource: terrainSourceValue(),
+    intensityBlend: Number(els.terrainBlend?.value) || DEFAULT_TERRAIN_TUNING.terrainBlend,
+    intensitySeries: sampledTargetIntensitySeries(),
+  });
+}
+
+function sampledTargetIntensitySeries() {
+  if (!terrainRoute?.samples?.length || terrainSourceValue() === "cues") {
+    return [];
+  }
+  const candidates = sampledTargetCandidateTimes();
+  const opts = terrainOptions();
+  return buildExtremaPreservingSeries({
+    durationS: profile.duration_s,
+    sampleStepS: opts.sampleStepS,
+    candidateTimes: candidates,
+    intensityAt: (time) => targetSourceIntensityAt(time),
+  });
+}
+
+function sampledTargetCandidateTimes() {
+  const derivedTimes = derivedIntensityPoints().map((point) => point.t);
+  const cueTimes = profile.cues?.map((cue) => Number(cue.t)).filter(Number.isFinite) ?? [];
+  return terrainSourceValue() === "blended"
+    ? [...derivedTimes, ...cueTimes]
+    : derivedTimes;
+}
+
+function targetSourceIntensityAt(time) {
+  if (terrainSourceValue() === "blended") {
+    return blendedTerrainIntensityAt(time);
+  }
+  return derivedIntensityAt(time)?.intensity ?? null;
 }
 
 function terrainOptions() {
@@ -593,10 +894,14 @@ function resetTerrainTuning() {
     }
   }
   terrainRoute = buildTerrainRoute();
+  syncControllerIntensitySource();
+  controller.resetWrites();
   renderTerrainTuning();
   renderTerrainSummary();
   drawRideChart();
   updateAnalysis();
+  renderTarget(controller.targetAt(latestVideoTime));
+  tick(true);
   showTerrainHelp("terrainGradeScale");
 }
 
@@ -696,7 +1001,7 @@ function derivedIntensityPoints() {
   if (!Array.isArray(points)) {
     return [];
   }
-  return points
+  const normalized = points
     .map((point) => ({
       ...point,
       t: Number(point.t),
@@ -704,6 +1009,16 @@ function derivedIntensityPoints() {
     }))
     .filter((point) => Number.isFinite(point.t) && Number.isFinite(point.intensity))
     .sort((a, b) => a.t - b.t);
+  return applySymmetricSmoothing(normalized, intensitySmoothingWindowS());
+}
+
+function intensitySmoothingWindowS() {
+  return Math.max(0, Number(els.intensitySmoothing?.value) || 0);
+}
+
+function syncIntensitySmoothingOutput() {
+  const value = intensitySmoothingWindowS();
+  els.intensitySmoothingOut.textContent = value === 0 ? "off" : `${Math.round(value)}s`;
 }
 
 function derivedIntensityAt(timeS) {
@@ -716,6 +1031,49 @@ function derivedIntensityAt(timeS) {
     if (point.t > timeS) {
       break;
     }
+    current = point;
+  }
+  return current;
+}
+
+// Per-window BPM from audio_features when the active curve carries it
+// (v0.3 / v0.4 after BPM extraction). Returns null otherwise so callers
+// can fall back to the per-section cue.bpm.
+//
+// Smoothing reuses the intensity-smoothing window so a single slider
+// controls both signals consistently. Per-frame tempo from librosa is
+// noisy at sub-second resolution — smoothing makes the BPM line track
+// musical phrases rather than estimator jitter.
+function audioBpmAt(timeS) {
+  const points = derivedIntensityPoints();
+  if (points.length === 0) {
+    return null;
+  }
+  const window = intensitySmoothingWindowS();
+  if (window === 0) {
+    const point = nearestPointAtOrBefore(points, timeS);
+    const bpm = Number(point?.audio_features?.bpm);
+    return Number.isFinite(bpm) && bpm > 0 ? bpm : null;
+  }
+  const half = window / 2;
+  let sum = 0;
+  let count = 0;
+  for (const point of points) {
+    if (point.t < timeS - half) continue;
+    if (point.t > timeS + half) break;
+    const bpm = Number(point.audio_features?.bpm);
+    if (Number.isFinite(bpm) && bpm > 0) {
+      sum += bpm;
+      count += 1;
+    }
+  }
+  return count > 0 ? sum / count : null;
+}
+
+function nearestPointAtOrBefore(points, timeS) {
+  let current = points[0];
+  for (const point of points) {
+    if (point.t > timeS) break;
     current = point;
   }
   return current;
@@ -846,6 +1204,8 @@ function drawRideChart() {
   const plotLeft = pad.left;
   const plotRight = width - pad.right;
   const plotWidth = plotRight - plotLeft;
+  const chartWindow = currentChartWindow();
+  updateChartRangeLabel(chartWindow);
   const maxPower = Math.max(Number(els.maxTargetInput.value) || 420, controller.ftp * 1.25, 200);
   const minCadence = 60;
   const maxCadence = 115;
@@ -859,7 +1219,11 @@ function drawRideChart() {
   }
   drawPowerArea(ctx, plotLeft, plotWidth, plotArea, maxPower);
   drawTerrainProfile(ctx, plotLeft, plotWidth, plotArea);
-  drawDerivedIntensityCurve(ctx, plotLeft, plotWidth, plotArea);
+  drawIntensityGuideLines(ctx, plotLeft, plotWidth, plotArea, maxPower);
+  drawDerivedIntensityCurve(ctx, plotLeft, plotWidth, plotArea, maxPower);
+  if (els.authoredCuesToggle.checked) {
+    drawAuthoredCuesCurve(ctx, plotLeft, plotWidth, plotArea, maxPower);
+  }
   if (els.blendedIntensityToggle.checked) {
     drawBlendedIntensityCurve(ctx, plotLeft, plotWidth, plotArea);
   }
@@ -869,9 +1233,26 @@ function drawRideChart() {
   drawMusicBpmCurve(ctx, plotLeft, plotWidth, plotArea, minMusicBpm, maxMusicBpm);
   drawPlayhead(ctx, plotLeft, plotWidth, plotArea.top, plotArea.bottom);
   drawHoverLine(ctx, plotLeft, plotWidth, plotArea.top, plotArea.bottom);
+  drawSelectionPreviewMarkers(ctx, plotLeft, plotWidth, plotArea.top, plotArea.bottom);
   drawAnnotationMarkers(ctx, plotArea, plotLeft, plotWidth);
-  drawChartLabels(ctx, width, height, plotArea, maxPower, minCadence, maxCadence, minMusicBpm, maxMusicBpm);
+  drawChartLabels(ctx, width, height, plotArea, maxPower, minCadence, maxCadence, minMusicBpm, maxMusicBpm, chartWindow);
   drawElevationAxis(ctx, plotRight, plotArea);
+}
+
+function currentChartWindow() {
+  if (els.chartRangeSelect.value === "custom") {
+    return customChartWindow(customChartSelection.startS, customChartSelection.endS, profile.duration_s);
+  }
+  return chartWindowFor(els.chartRangeSelect.value, latestVideoTime, profile.duration_s);
+}
+
+function updateChartRangeLabel(chartWindow) {
+  if (chartWindow.rangeId === "full") {
+    els.chartRangeLabel.textContent = "Showing full ride";
+    return;
+  }
+  const prefix = chartWindow.rangeId === "custom" ? "Selected" : "Showing";
+  els.chartRangeLabel.textContent = `${prefix} ${formatTime(chartWindow.startS)} - ${formatTime(chartWindow.endS)}`;
 }
 
 function drawSongDivisionLines(ctx, plotLeft, plotWidth, top, bottom) {
@@ -882,7 +1263,8 @@ function drawSongDivisionLines(ctx, plotLeft, plotWidth, top, bottom) {
     boundaries.add(track.end_s);
   }
   for (const boundary of boundaries) {
-    if (boundary <= 0 || boundary >= profile.duration_s) {
+    const chartWindow = currentChartWindow();
+    if (boundary <= chartWindow.startS || boundary >= chartWindow.endS) {
       continue;
     }
     const x = timeToX(boundary, plotLeft, plotWidth);
@@ -896,10 +1278,11 @@ function drawSongDivisionLines(ctx, plotLeft, plotWidth, top, bottom) {
 }
 
 function drawPowerArea(ctx, plotLeft, plotWidth, area, maxPower) {
+  const chartWindow = currentChartWindow();
   let previousX = plotLeft;
-  let previousY = powerToY(controller.targetAt(0).watts, area, maxPower);
+  let previousY = powerToY(controller.targetAt(chartWindow.startS).watts, area, maxPower);
   for (let x = plotLeft; x <= plotLeft + plotWidth; x += 4) {
-    const time = ((x - plotLeft) / plotWidth) * profile.duration_s;
+    const time = xToTimeInWindow(x, plotLeft, plotWidth, chartWindow);
     const target = controller.targetAt(time);
     const y = powerToY(target.watts, area, maxPower);
     ctx.beginPath();
@@ -916,9 +1299,10 @@ function drawPowerArea(ctx, plotLeft, plotWidth, area, maxPower) {
 }
 
 function drawCadenceCurve(ctx, plotLeft, plotWidth, area, minCadence, maxCadence) {
+  const chartWindow = currentChartWindow();
   ctx.beginPath();
   for (let x = plotLeft; x <= plotLeft + plotWidth; x += 4) {
-    const time = ((x - plotLeft) / plotWidth) * profile.duration_s;
+    const time = xToTimeInWindow(x, plotLeft, plotWidth, chartWindow);
     const target = controller.targetAt(time);
     const y = cadenceToY(target.cadenceRpm, area, minCadence, maxCadence);
     if (x === plotLeft) {
@@ -935,11 +1319,12 @@ function drawCadenceCurve(ctx, plotLeft, plotWidth, area, minCadence, maxCadence
 }
 
 function drawMusicBpmCurve(ctx, plotLeft, plotWidth, area, minMusicBpm, maxMusicBpm) {
+  const chartWindow = currentChartWindow();
   ctx.beginPath();
   for (let x = plotLeft; x <= plotLeft + plotWidth; x += 4) {
-    const time = ((x - plotLeft) / plotWidth) * profile.duration_s;
-    const target = controller.targetAt(time);
-    const y = musicBpmToY(target.musicBpm, area, minMusicBpm, maxMusicBpm);
+    const time = xToTimeInWindow(x, plotLeft, plotWidth, chartWindow);
+    const bpm = audioBpmAt(time) ?? controller.targetAt(time).musicBpm;
+    const y = musicBpmToY(bpm, area, minMusicBpm, maxMusicBpm);
     if (x === plotLeft) {
       ctx.moveTo(x, y);
     } else {
@@ -957,7 +1342,13 @@ function drawTerrainProfile(ctx, plotLeft, plotWidth, area) {
   if (!terrainRoute?.samples?.length) {
     return;
   }
-  const samples = terrainRoute.samples;
+  const chartWindow = currentChartWindow();
+  const samples = terrainRoute.samples.filter((sample) => (
+    sample.timeS >= chartWindow.startS && sample.timeS <= chartWindow.endS
+  ));
+  if (samples.length < 2) {
+    return;
+  }
   const yForElevation = elevationToYFactory(area);
 
   ctx.beginPath();
@@ -979,7 +1370,10 @@ function drawTerrainProgress(ctx, plotLeft, plotWidth, area) {
   if (!terrainRoute?.samples?.length) {
     return;
   }
-  const samples = terrainRoute.samples.filter((sample) => sample.timeS <= latestVideoTime);
+  const chartWindow = currentChartWindow();
+  const samples = terrainRoute.samples.filter((sample) => (
+    sample.timeS >= chartWindow.startS && sample.timeS <= chartWindow.endS && sample.timeS <= latestVideoTime
+  ));
   if (samples.length < 2) {
     return;
   }
@@ -1000,6 +1394,9 @@ function drawTerrainProgress(ctx, plotLeft, plotWidth, area) {
   ctx.stroke();
 
   const point = routePointAt(terrainRoute, terrainDistanceAtVideoTime(latestVideoTime));
+  if (latestVideoTime < chartWindow.startS || latestVideoTime > chartWindow.endS) {
+    return;
+  }
   const x = timeToX(latestVideoTime, plotLeft, plotWidth);
   const y = yForElevation(point?.elevationM ?? 0);
   ctx.fillStyle = "#f2f4f8";
@@ -1063,8 +1460,9 @@ function terrainElevationDomain() {
   };
 }
 
-function drawDerivedIntensityCurve(ctx, plotLeft, plotWidth, area) {
-  const points = derivedIntensityPoints();
+function drawDerivedIntensityCurve(ctx, plotLeft, plotWidth, area, maxPower) {
+  const chartWindow = currentChartWindow();
+  const points = visibleStepPoints(derivedIntensityPoints(), (point) => point.t, chartWindow);
   if (points.length < 2) {
     return;
   }
@@ -1073,7 +1471,7 @@ function drawDerivedIntensityCurve(ctx, plotLeft, plotWidth, area) {
   for (let index = 0; index < points.length; index += 1) {
     const point = points[index];
     const x = timeToX(point.t, plotLeft, plotWidth);
-    const y = intensityToY(point.intensity, area);
+    const y = derivedIntensityToY(point.intensity, area, maxPower);
     if (index === 0) {
       ctx.moveTo(x, y);
     } else {
@@ -1082,23 +1480,81 @@ function drawDerivedIntensityCurve(ctx, plotLeft, plotWidth, area) {
     }
     previousY = y;
   }
-  const finalX = timeToX(profile.duration_s, plotLeft, plotWidth);
+  const finalX = timeToX(chartWindow.endS, plotLeft, plotWidth);
   ctx.lineTo(finalX, previousY);
-  ctx.strokeStyle = "rgba(216, 180, 254, 0.72)";
-  ctx.lineWidth = 1.4;
+  ctx.save();
+  ctx.strokeStyle = "rgba(3, 7, 18, 0.92)";
+  ctx.lineWidth = 4.6;
+  ctx.setLineDash([5, 6]);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(34, 211, 238, 0.98)";
+  ctx.lineWidth = 2.3;
   ctx.setLineDash([2, 6]);
   ctx.stroke();
   ctx.setLineDash([]);
+  ctx.restore();
+}
+
+// Authored cues line: renders profile.cues as a step function on the same
+// power-axis as the derived overlay so they're directly comparable. Useful
+// when tuning the blend slider — you can see the authored baseline next to
+// the rider-tuned derived curve and the blended target the trainer follows.
+function drawAuthoredCuesCurve(ctx, plotLeft, plotWidth, area, maxPower) {
+  const cues = Array.isArray(profile.cues) ? profile.cues : [];
+  if (cues.length < 2) {
+    return;
+  }
+  const chartWindow = currentChartWindow();
+  const cuePoints = cues
+    .map((cue) => ({ t: Number(cue.t), intensity: Number(cue.ftp_pct) }))
+    .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.intensity))
+    .sort((a, b) => a.t - b.t);
+  const points = visibleStepPoints(cuePoints, (point) => point.t, chartWindow);
+  if (points.length < 2) {
+    return;
+  }
+  ctx.beginPath();
+  let previousY = null;
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index];
+    const x = timeToX(point.t, plotLeft, plotWidth);
+    const y = derivedIntensityToY(point.intensity, area, maxPower);
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, previousY);
+      ctx.lineTo(x, y);
+    }
+    previousY = y;
+  }
+  const finalX = timeToX(chartWindow.endS, plotLeft, plotWidth);
+  ctx.lineTo(finalX, previousY);
+  ctx.save();
+  ctx.strokeStyle = "rgba(3, 7, 18, 0.92)";
+  ctx.lineWidth = 4.0;
+  ctx.setLineDash([3, 8]);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(244, 114, 182, 0.95)"; // rose-400 — distinct from cyan derived and green blended
+  ctx.lineWidth = 1.8;
+  ctx.setLineDash([3, 8]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
 }
 
 function drawBlendedIntensityCurve(ctx, plotLeft, plotWidth, area) {
   if (!terrainRoute?.samples?.length) {
     return;
   }
+  const chartWindow = currentChartWindow();
+  const samples = visibleStepPoints(terrainRoute.samples, (sample) => sample.timeS, chartWindow);
+  if (samples.length < 2) {
+    return;
+  }
   ctx.beginPath();
   let previousY = null;
-  for (let index = 0; index < terrainRoute.samples.length; index += 1) {
-    const sample = terrainRoute.samples[index];
+  for (let index = 0; index < samples.length; index += 1) {
+    const sample = samples[index];
     const x = timeToX(sample.timeS, plotLeft, plotWidth);
     const y = intensityToY(sample.intensity, area);
     if (index === 0) {
@@ -1109,7 +1565,7 @@ function drawBlendedIntensityCurve(ctx, plotLeft, plotWidth, area) {
     }
     previousY = y;
   }
-  const finalX = timeToX(profile.duration_s, plotLeft, plotWidth);
+  const finalX = timeToX(chartWindow.endS, plotLeft, plotWidth);
   ctx.lineTo(finalX, previousY);
   ctx.strokeStyle = "rgba(52, 211, 153, 0.86)";
   ctx.lineWidth = 1.8;
@@ -1118,10 +1574,43 @@ function drawBlendedIntensityCurve(ctx, plotLeft, plotWidth, area) {
   ctx.setLineDash([]);
 }
 
+function drawIntensityGuideLines(ctx, plotLeft, plotWidth, area, maxPower) {
+  const points = derivedIntensityPoints().filter((point) => Number.isFinite(point.intensity));
+  if (points.length === 0) {
+    return;
+  }
+  const values = points.map((point) => point.intensity);
+  const guides = [
+    { label: "max", value: Math.max(...values), color: "rgba(239, 68, 68, 0.58)" },
+    { label: "mean", value: average(values), color: "rgba(250, 204, 21, 0.50)" },
+    { label: "min", value: Math.min(...values), color: "rgba(34, 197, 94, 0.50)" },
+  ];
+  ctx.save();
+  ctx.font = "10px system-ui, sans-serif";
+  for (const guide of guides) {
+    const y = derivedIntensityToY(guide.value, area, maxPower);
+    ctx.strokeStyle = guide.color;
+    ctx.lineWidth = guide.label === "mean" ? 1.2 : 1;
+    ctx.setLineDash(guide.label === "mean" ? [5, 4] : [2, 5]);
+    ctx.beginPath();
+    ctx.moveTo(plotLeft, y);
+    ctx.lineTo(plotLeft + plotWidth, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = guide.color;
+    ctx.fillText(`${guide.label} ${Math.round(guide.value * 100)}%`, plotLeft + plotWidth - 58, y - 3);
+  }
+  ctx.restore();
+}
+
 
 function drawActualSamples(ctx, plotLeft, plotWidth, area, maxPower) {
-  const barWidth = Math.max(2, plotWidth / Math.max(profile.duration_s, 1));
+  const chartWindow = currentChartWindow();
+  const barWidth = Math.max(2, plotWidth / Math.max(chartWindow.durationS, 1));
   for (const sample of rideSamples) {
+    if (sample.time < chartWindow.startS || sample.time > chartWindow.endS) {
+      continue;
+    }
     const x = timeToX(sample.time, plotLeft, plotWidth);
     const color = sample.maintained ? "rgba(73, 194, 122, 0.82)" : "rgba(238, 92, 85, 0.82)";
     const powerY = powerToY(sample.power, area, maxPower);
@@ -1131,6 +1620,10 @@ function drawActualSamples(ctx, plotLeft, plotWidth, area, maxPower) {
 }
 
 function drawPlayhead(ctx, plotLeft, plotWidth, top, bottom) {
+  const chartWindow = currentChartWindow();
+  if (latestVideoTime < chartWindow.startS || latestVideoTime > chartWindow.endS) {
+    return;
+  }
   const x = timeToX(latestVideoTime, plotLeft, plotWidth);
   ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
   ctx.lineWidth = 2;
@@ -1144,6 +1637,10 @@ function drawHoverLine(ctx, plotLeft, plotWidth, top, bottom) {
   if (hoverChartTime == null) {
     return;
   }
+  const chartWindow = currentChartWindow();
+  if (hoverChartTime < chartWindow.startS || hoverChartTime > chartWindow.endS) {
+    return;
+  }
   const x = timeToX(hoverChartTime, plotLeft, plotWidth);
   ctx.strokeStyle = "rgba(244, 184, 74, 0.92)";
   ctx.lineWidth = 1;
@@ -1153,7 +1650,37 @@ function drawHoverLine(ctx, plotLeft, plotWidth, top, bottom) {
   ctx.stroke();
 }
 
-function drawChartLabels(ctx, width, height, area, maxPower, minCadence, maxCadence, minMusicBpm, maxMusicBpm) {
+function drawSelectionPreviewMarkers(ctx, plotLeft, plotWidth, top, bottom) {
+  if (!els.chartSelectionToggle.checked) {
+    return;
+  }
+  const chartWindow = currentChartWindow();
+  const start = Number(els.chartStartSlider.value);
+  const end = Number(els.chartEndSlider.value);
+  drawSelectionMarker(ctx, Math.min(start, end), "rgba(34, 197, 94, 0.95)", plotLeft, plotWidth, top, bottom, chartWindow);
+  drawSelectionMarker(ctx, Math.max(start, end), "rgba(239, 68, 68, 0.95)", plotLeft, plotWidth, top, bottom, chartWindow);
+}
+
+function drawSelectionMarker(ctx, time, color, plotLeft, plotWidth, top, bottom, chartWindow) {
+  if (time < chartWindow.startS || time > chartWindow.endS) {
+    return;
+  }
+  const x = timeToX(time, plotLeft, plotWidth);
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, top);
+  ctx.lineTo(x, bottom);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(x, top + 5, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawChartLabels(ctx, width, height, area, maxPower, minCadence, maxCadence, minMusicBpm, maxMusicBpm, chartWindow) {
   ctx.fillStyle = "rgba(242, 244, 248, 0.86)";
   ctx.font = "12px system-ui, sans-serif";
   ctx.fillText("Power", 8, area.top + 14);
@@ -1171,13 +1698,37 @@ function drawChartLabels(ctx, width, height, area, maxPower, minCadence, maxCade
     ctx.fillStyle = "rgba(52, 211, 153, 0.94)";
     ctx.fillText("Blended", 7, area.top + 94);
   }
-  ctx.fillText(formatTime(0), 44, height - 5);
-  const endText = formatTime(profile.duration_s);
+  ctx.fillText(formatTime(chartWindow.startS), 44, height - 5);
+  const endText = formatTime(chartWindow.endS);
   ctx.fillText(endText, width - 10 - ctx.measureText(endText).width, height - 5);
 }
 
 function timeToX(time, plotLeft, plotWidth) {
-  return plotLeft + (Math.max(0, Math.min(profile.duration_s, time)) / profile.duration_s) * plotWidth;
+  return timeToXInWindow(time, plotLeft, plotWidth, currentChartWindow());
+}
+
+function visibleStepPoints(points, timeForPoint, chartWindow) {
+  const sorted = [...points].sort((a, b) => timeForPoint(a) - timeForPoint(b));
+  const visible = [];
+  let previous = null;
+  for (const point of sorted) {
+    const time = timeForPoint(point);
+    if (time < chartWindow.startS) {
+      previous = point;
+      continue;
+    }
+    if (time > chartWindow.endS) {
+      break;
+    }
+    if (previous && visible.length === 0) {
+      visible.push(previous);
+    }
+    visible.push(point);
+  }
+  if (visible.length === 0 && previous) {
+    visible.push(previous, { ...previous, t: chartWindow.endS, timeS: chartWindow.endS });
+  }
+  return visible;
 }
 
 function powerToY(watts, area, maxPower) {
@@ -1199,14 +1750,25 @@ function intensityToY(intensity, area) {
   return area.bottom - Math.max(0, Math.min(2, intensity)) / 2 * (area.bottom - area.top);
 }
 
+function derivedIntensityToY(intensity, area, maxPower) {
+  if (terrainSourceValue() === "derived") {
+    const watts = Math.min(
+      Number(els.maxTargetInput.value) || maxPower,
+      Math.max(0, Number(intensity) * controller.ftp),
+    );
+    return powerToY(watts, area, maxPower);
+  }
+  return intensityToY(intensity, area);
+}
+
 function onRideChartMouseMove(event) {
   const canvas = els.rideChart;
   const rect = canvas.getBoundingClientRect();
   const padLeft = 44;
-  const padRight = 10;
+  const padRight = 54;
   const plotWidth = Math.max(1, rect.width - padLeft - padRight);
   const x = Math.max(padLeft, Math.min(rect.width - padRight, event.clientX - rect.left));
-  hoverChartTime = ((x - padLeft) / plotWidth) * profile.duration_s;
+  hoverChartTime = xToTimeInWindow(x, padLeft, plotWidth, currentChartWindow());
   updateRideChartTooltip(event, hoverChartTime);
   drawRideChart();
 }
@@ -1250,7 +1812,7 @@ function updateRideChartTooltip(event, time) {
     <span>Song: ${track ? `${track.index + 1}. ${escapeHtml(track.title)}` : "not aligned"}</span>
     <span>Target: ${target.watts} W (${Math.round(target.ftpPct * 100)}% FTP), ${target.cadenceRpm} rpm</span>
     <span>Mode: ${escapeHtml(target.modeLabel ?? "Workout")}${target.planBlock ? ` / ${escapeHtml(target.planBlock)}` : ""}</span>
-    <span>Music BPM: ${target.musicBpm}</span>
+    <span>Music BPM: ${(() => { const b = audioBpmAt(time); return b != null ? `${Math.round(b)} (per-window)` : `${target.musicBpm} (per-section)`; })()}</span>
     <span>${derivedIntensityLabel()}: ${derived ? `${Math.round(derived.intensity * 100)}%` : "not available"}</span>
     <span>Terrain source: ${escapeHtml(terrainSourceDisplayLabel())}</span>
     <span>Blended terrain intensity: ${Math.round(blendedIntensity * 100)}%</span>
@@ -1358,8 +1920,12 @@ function trackAt(time) {
 
 function renderSongStrip() {
   els.songStrip.replaceChildren();
-  const windows = trackWindows();
+  const chartWindow = currentChartWindow();
+  const windows = trackWindows().filter((track) => overlapsWindow(track.start_s, track.end_s, chartWindow));
   for (const track of windows) {
+    const visibleStart = Math.max(track.start_s, chartWindow.startS);
+    const visibleEnd = Math.min(track.end_s, chartWindow.endS);
+    const visibleDuration = Math.max(0, visibleEnd - visibleStart);
     const segment = document.createElement("div");
     segment.className = "song-segment";
     if (latestVideoTime >= track.start_s && latestVideoTime < track.end_s) {
@@ -1370,8 +1936,21 @@ function renderSongStrip() {
     label.textContent = track.title;
     segment.append(label);
     segment.title = `${formatTime(track.start_s)} - ${formatTime(track.end_s)} ${track.title}`;
-    segment.style.flexBasis = `${(track.duration_s / profile.duration_s) * 100}%`;
+    segment.style.flexBasis = `${(visibleDuration / chartWindow.durationS) * 100}%`;
     segment.style.background = `linear-gradient(90deg, ${powerColor(track.avgFtpPct, 0.94)}, ${powerColor(Math.min(1.2, track.avgFtpPct + 0.12), 0.98)})`;
+    segment.addEventListener("click", () => {
+      if (!els.songZoomToggle.checked) {
+        return;
+      }
+      customChartSelection = {
+        startS: track.start_s,
+        endS: track.end_s,
+      };
+      els.chartRangeSelect.value = "custom";
+      syncChartSelectionControls();
+      renderSongStrip();
+      drawRideChart();
+    });
     els.songStrip.append(segment);
   }
   window.requestAnimationFrame(updateSongMarquees);
@@ -1513,7 +2092,7 @@ function populateAnnotationPresets() {
       `<span class="preset-key">${escapeHtml(preset.key)}</span>` +
       `<span class="preset-label">${escapeHtml(preset.label)}</span>` +
       `<span class="preset-hint">${escapeHtml(preset.tag)}</span>`;
-    btn.addEventListener("click", () => sendAnnotation(preset.tag));
+    btn.addEventListener("click", () => sendAnnotation(preset.tag, currentAnnotationNote()));
     els.annotationPresets.append(btn);
   }
 }
@@ -1584,14 +2163,18 @@ function onAnnotationOverlayKeyDown(event) {
     const preset = presetForHotkey(event.key);
     if (preset) {
       event.preventDefault();
-      sendAnnotation(preset.tag);
+      sendAnnotation(preset.tag, currentAnnotationNote());
     }
   }
 }
 
+function currentAnnotationNote() {
+  return els.annotationNoteInput.value.trim();
+}
+
 function submitFromOverlayInputs() {
   const tag = els.annotationTagInput.value.trim();
-  const note = els.annotationNoteInput.value.trim();
+  const note = currentAnnotationNote();
   if (!tag) {
     showAnnotationError("pick a preset or type a tag");
     return;
@@ -1653,9 +2236,13 @@ function drawAnnotationMarkers(ctx, area, plotLeft, plotWidth) {
   if (annotations.length === 0) {
     return;
   }
+  const chartWindow = currentChartWindow();
   ctx.save();
   for (const ann of annotations) {
     if (!Number.isFinite(ann.videoTime) || ann.videoTime < 0) {
+      continue;
+    }
+    if (ann.videoTime < chartWindow.startS || ann.videoTime > chartWindow.endS) {
       continue;
     }
     const x = timeToX(ann.videoTime, plotLeft, plotWidth);

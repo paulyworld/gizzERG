@@ -2,14 +2,30 @@
 
 > Browser-based ERG controller experiment for the YouTube concert ride.
 
-**Last updated:** 2026-05-23
-**Current branch:** `develop`
-**Current focus:** Terrain-dev UI for gizzERG. The app now derives a synthetic
-route from the concert profile, displays current/total distance and climbing,
-draws a net-elevation line on the ride timeline, and lets the rider tune grade,
-rolling resistance, aero drag, and mass from the browser. These controls are
-still a dev/test surface, but they now affect estimated planned terrain TSS
-instead of being display-only.
+**Last updated:** 2026-06-06
+**Current branch:** `feat/full-concert-curves-tuning-controls`
+**Current focus:** Music-intensity review and tuning UI for gizzERG. The app
+now supports selectable curve versions, a v0.4 subjective-feel curve,
+zoomable/tall timeline review, sidecar-backed F2 annotations, and Raw Feel
+target power driven by sampled derived/blended intensity. Terrain controls are
+still a dev/test surface, but they now affect the shaded target-power path when
+Raw Feel uses `Derived intensity` or `Blended`.
+
+**2026-06-06 update — tuning controls + full-concert curves landed:**
+
+| Area | What landed |
+|---|---|
+| **Full-concert audio extraction** | v0.3 / v0.4 now cover 833→end of the concert (3974 points at 2s sample step). Manual-seed splice removed for t≥833 — audio extraction is the sole source past the warmup intro. Constants renamed: `bnnIdWzGSYISectionDynamics20m` → `bnnIdWzGSYIAudioFeaturesFull`; exposed via `bnnIdWzGSYIAudioFeaturesV03` + `bnnIdWzGSYISubjectiveV04`. Library ids: `audio-v0.3-20m`/`audio-v0.4-subjective-20m` → `audio-v0.3`/`audio-v0.4-subjective`. |
+| **Per-window BPM** | `tools/profile-builder/build_profile.py` calls `librosa.feature.tempo(..., aggregate=None)` per chunk; `bpm` lands unnormalized in `audio_features`. Range observed: 68-172 BPM (median 112). Chart's BPM line, guidance text, and hover tooltip prefer per-window BPM via `audioBpmAt(time)`; fall back to per-section `cue.bpm` when the active curve has no audio data. Tooltip labels source as `(per-window)` vs `(per-section)`. |
+| **Default metal style segments** | v0.4 `styleSegments` extended beyond Gila/Motor Spirit: The Balrog (0.40), Iron Lung (0.35, label `heavy`), Evil Death Roll (0.50, label `thrash`), Hog Calling Contest (0.40). Unsegmented songs still get `style_prior = 0` — extend the list in `src/library/intensity-curves.js` as you tune more sections. |
+| **Rider-tuned manual seed v0.2** | New `bnnIdWzGSYIManualSeedV02Curve` (`model_version: manual-seed-v0.2-motorspirit-mindfuzz`) — 26 dense anchor points across t=1607-2036 derived from F2 annotations in `repos/sidecar/docs/recordings/semantic-test-02.jsonl`. Outside that window inherits v0.1. Selectable via `manual-seed-v0.2` library id. |
+| **Intensity smoothing slider** | New 0-60s symmetric centered moving-average. Default off (preserves extrema). Applied at `derivedIntensityPoints()` so it affects chart overlay, controller target series, F2 annotation context, *and* the BPM line — single knob, consistent everywhere. |
+| **Authored Cues chart overlay** | New `cues` toggle in the chart header. Renders `profile.cues` as a rose-magenta step line on the same power-axis as the cyan derived overlay. Lets you compare authored / derived / blended at a glance while tuning the blend slider. |
+| **Curve dropdown persistence** | LocalStorage-keyed per video id (`gizzERG:curveSelection:<videoId>`). Falls back to first option gracefully when the stored id no longer exists. Boot-time init reorder fixed: `activateSelectedProfile({ reloadVideo: false })` now runs after `populateCurveSelect()` so the restored choice *actually loads* (was a dropdown-only restore before). |
+
+## ⚠️ Known UX gotcha (gizzERG issue #4)
+
+Pressing a preset digit (1-5) inside the F2 overlay auto-submits immediately. To attach a note to a preset tag, type the note *first*, then press the digit. Riders who reach for the digit first lose the qualitative context. Validated 2026-05-27 smoke test (`repos/sidecar/docs/recordings/f2-smoke-test.jsonl`); filed at https://github.com/paulyworld/gizzERG/issues/4 with three suggested fixes.
 
 ## Current Shape
 
@@ -25,10 +41,20 @@ instead of being display-only.
   workout targets while using the music as a rough guide.
 - `src/concert-profile.js` contains the first manual rolling map for
   `bnnIdWzGSYI`.
-- The same profile now includes a seeded `derived_intensity_curve` with
-  `model_version`. This seed mirrors authored cue intensity until the audio
-  feature preprocessor lands, but it gives the browser and later tools a real
-  schema to consume.
+- The app now has a minimal profile library split:
+  `src/library/videos.js` owns video identity, YouTube URL, duration, intro
+  offset, source metadata, and tracklist; `src/library/intensity-curves.js`
+  owns selectable intensity curves; `src/concert-profile.js` composes those
+  into the app-facing profile.
+- The default curve remains the manual seeded `derived_intensity_curve` with
+  `model_version="manual-seed-v0.1"`. Two selectable 20-minute audio previews
+  are registered for the King Gizzard video:
+  `audio-features-librosa-v0.3-section-dynamics-preview-20m` and
+  `audio-features-librosa-v0.4-subjective-feel-preview-20m`. Both use dense
+  points for video 13:53-33:53 and manual seed points outside that sample
+  window, so testing curve versions does not break the rest of the concert.
+  v0.4 is a browser-side transform over the v0.3 payload: local contrast,
+  musical pressure, light style priors, and smooth-vocal release penalty.
 - The profile also includes Bandcamp-derived Night 2 tracklist metadata for the
   same video. The source is `Live in Greece '25` on Midnight Gnome People's
   Bandcamp page, which explicitly lists `bnnIdWzGSYI` as Night 2 and identifies
@@ -38,8 +64,9 @@ instead of being display-only.
 - A horizontal ride timeline canvas is pinned as an overlay at the bottom of
   the YouTube player. It spans the video column width, draws target power,
   target cadence, music BPM, actual power/cadence samples, rider annotations,
-  and a line-only net-elevation profile. The song color background was removed
-  because it made the timeline too crowded once terrain was added.
+  a line-only net-elevation profile, derived/blended intensity overlays, and
+  global intensity min/mean/max guide lines. The song color background was
+  removed because it made the timeline too crowded once terrain was added.
 - Video pause uses an app-level soft pause: the browser immediately sends a
   low easy-spin target instead of waiting for cadence bailout. The sidecar's
   cadence bailout still owns the low-cadence safety case, including delayed
@@ -99,6 +126,17 @@ Current chart behavior:
   strip below the canvas so the plot area has fewer overlapping visual layers.
 - The chart header has a `songs` toggle that draws vertical song-boundary lines
   behind the power graph when desired.
+- The chart header has a `range` selector: `Full`, `20 min`, `10 min`,
+  `5 min`, `2 min`, and `Custom`. Preset ranges center on current video time.
+  `Custom` is set by the `select` controls.
+- The `select` toggle exposes start/end sliders above the chart and a `Zoom`
+  button. Slider movement draws a green vertical start marker and red vertical
+  end marker on the chart. The default selection is the current 20-minute
+  audio-review slice, 13:53-33:53.
+- The `song` toggle turns song-strip segments into zoom targets. Clicking a
+  song segment sets the custom range exactly to that song.
+- The `tall` toggle expands the chart canvas to 320px high inside the video
+  overlay, staying above the transport controls.
 - The bottom song strip includes an explicit `Intro / warmup` segment before
   Gila Monster. Segment widths are exactly proportional to their timeline
   duration and aligned to the chart plot area. Song title tabs use the
@@ -115,9 +153,15 @@ Current chart behavior:
   instead of auto-normalizing every slider state, so endpoint movement reflects
   terrain tuning changes. The right side of the chart includes an elevation
   axis/legend.
-- The seeded derived intensity curve is drawn as a subtle dotted purple line
-  and appears in the hover tooltip. Keep this visually quiet; the chart is
-  already dense.
+- The selected derived intensity curve is drawn as a bright cyan dotted line
+  with a dark halo so it remains visible above green/yellow/red power fills.
+  In `Derived intensity` mode, this overlay uses the same power-axis scaling as
+  the shaded target-power area, so changing FTP does not make the visual
+  comparison drift. In `Blended` and `Authored cues` modes, the derived overlay
+  remains an intensity-scale reference.
+- Horizontal guide lines show global min/mean/max intensity for the selected
+  derived curve. In `Derived intensity` mode, these guide lines use the same
+  power-axis scaling as the derived overlay.
 - Rider progress traces over the net-elevation line with a white progress
   stroke and marker. The terrain dev readout shows current/total distance and
   current/total positive gain.
@@ -138,6 +182,9 @@ Current chart behavior:
   resets ERG write throttling, and immediately recalculates the target. With
   it disabled, chart hover is read-only to avoid accidental jumps during a
   real ride.
+
+Current caveat: annotation marker hover does not yet show annotation
+tag/note. Markers are visible, but tooltip integration is still pending.
 
 The threshold helper is `targetMaintained(...)` in `src/erg-controller.js`:
 
@@ -162,11 +209,21 @@ drives rider feel.
   when present. Pass `intensitySource: "cues"` to force the authored cue map
   instead; this is covered by tests.
 - The terrain panel now exposes that choice directly with a `Terrain source`
-  selector: `Derived intensity` or `Authored cues`.
+  selector: `Derived intensity`, `Blended`, or `Authored cues`.
 - `Sample step` controls route sampling cadence. Default is 5 seconds. Lower
   values are intended for manual-shift terrain and future audio-derived curves
   where grade should respond to musical changes more tightly than the current
   sparse authored cue map.
+- In Raw Feel, `Derived intensity` and `Blended` target power now use the same
+  sampled source series as the terrain route, so sample-step changes affect the
+  shaded target-power area and the target watts sent to the trainer. `Authored
+  cues` preserves the original cue/ramp behavior.
+- The sampled target series uses `src/intensity-sampling.js` to preserve
+  extrema inside coarse sample windows. Each sample window keeps its start/end
+  plus the strongest internal peak and deepest internal valley from the
+  underlying derived/blended curve. This is intended to avoid swallowing short
+  troughs/peaks at longer sample steps, e.g. the Motor Spirit drop around
+  24:42-24:54.
 - The route keeps net elevation and positive gain separate. `elevationM` is the
   mountain cross-section line. `elevationGainM` is cumulative climbing for
   totals/export context.
@@ -190,6 +247,11 @@ Open terrain caveat: sidecar should eventually own ride distance/elevation as
 the recording/export authority once it accepts a terrain profile from the
 client. The browser still owns route design and preview.
 
+Open model caveat: extrema preservation is a first-pass sampler, not final ride
+feel logic. Future work should add asymmetric attack/release rules so rises and
+drops can ramp differently around peaks/valleys rather than behaving like
+simple step holds.
+
 ## Profile Builder / Audio Features
 
 `tools/profile-builder/` now has the first real local audio-feature path. It
@@ -210,6 +272,17 @@ features from a local audio file with `librosa`.
   by default. Current weights are loudness 0.34, spectral centroid 0.16,
   onset density 0.22, percussive ratio 0.06, spectral contrast 0.14, and
   spectral change 0.08.
+- `src/subjective-intensity.js` adds a browser-side v0.4 preview transform
+  over the existing v0.3 payload. It combines:
+  `base_intensity`, `musical_pressure`, `local_contrast`, a light
+  `style_prior`, and `vocal_release_penalty`. This is deliberately selectable
+  in the UI rather than replacing v0.3, so v0.3/v0.4 can be reviewed side by
+  side by switching the `Curve` selector.
+- Current 20-minute comparison on the 13:53-33:53 review slice:
+  v0.3 min/p50/p90/max/avg was roughly `0.119/0.571/0.660/0.743/0.542`;
+  v0.4 was roughly `0.120/0.590/0.716/0.824/0.571`. Gila and Motor Spirit
+  peaks are lifted relative to v0.3, while the partial I'm in Your Mind section
+  is less globally boosted.
 - Raw BPM is intentionally not a weighted intensity feature. Keep it in
   `cue.bpm` for cadence guidance and display; use onset/beat strength and
   local timbre-change features for musical intensity.
@@ -221,22 +294,55 @@ features from a local audio file with `librosa`.
   tuning so the download can be reused.
 - Dependencies are in `tools/profile-builder/requirements.txt`.
 
+### Curve / video library
+
+The settings panel has two selectors:
+
+- `Video` is populated from `concertProfiles`, which currently wraps one
+  library video: `bnnIdWzGSYI`.
+- `Curve` is populated from `profile.available_intensity_curves`. Current
+  options are `manual-seed`, `audio-v0.3-20m`, and
+  `audio-v0.4-subjective-20m`.
+
+The file layout is intentionally small but points toward a future library
+manager:
+
+- `src/library/videos.js`: canonical video metadata, including
+  `youtube_id`, `youtube_url`, `duration_s`, `tracklist_intro_offset_s`, and
+  `tracks`.
+- `src/library/intensity-curves.js`: registered curves for each video id. The
+  manual seed lives here, and preview curves are composed here.
+- `src/audio-derived-curves.js`: generated dense curve data. Keep generated
+  audio-feature payloads out of `concert-profile.js`; register them through
+  `src/library/intensity-curves.js`.
+- `src/concert-profile.js`: app-facing composition layer for the current MVP
+  controller/tests.
+
+This keeps the current manual setup as the default while allowing local curve
+experiments from the UI. For now, adding another video means adding one object
+to `videos.js`, adding its curve options to `intensity-curves.js`, and adding
+the composed profile in `concert-profile.js`.
+
 ### Claude handoff — yt-dlp + librosa validation
 
-Codex added the implementation but has **not** run a live YouTube download yet.
-Local validation completed:
+Claude already validated the live YouTube/audio path on the 20-minute review
+slice. The full 2.5-hour extraction was killed by request after the pipeline
+proved expensive but functional. Current local validation includes:
 
 - `python -m pip install -r tools\profile-builder\requirements.txt`
   succeeded on this machine.
-- `python -m unittest discover tools\profile-builder\tests` passes: 6/6.
+- `python -m unittest discover tools\profile-builder\tests` passes.
 - `python -m py_compile tools\profile-builder\build_profile.py` passes.
-- `node --test tests/*.test.mjs` passes: 44/44.
+- `node --test tests/*.test.mjs` passes: 62/62.
 - Synthetic WAV smoke test succeeded:
   `python tools\profile-builder\build_profile.py --audio C:\tmp\gizzerg-smoke.wav --out C:\tmp\gizzerg-smoke-curve.json --sample-step-s 1`
   produced an `audio-features-librosa-v0.1` curve with dense points. Current
   extraction emits `audio-features-librosa-v0.3-section-dynamics`.
+- Real-music 20-minute smoke covered video 13:53-33:53 and produced the
+  committed/generated `src/audio-derived-curves.js` payload used by v0.3 and
+  transformed by v0.4.
 
-Next validation for Claude:
+Next full-audio validation for Claude, when ready:
 
 ```powershell
 cd C:\dev\roguERGlike\repos\concert-mvp
@@ -248,14 +354,17 @@ python tools\profile-builder\build_profile.py `
   --keep-audio
 ```
 
-Review the generated JSON before replacing the profile seed:
+Review generated JSON before registering it as a selectable curve:
 
 - Confirm duration/point count roughly matches the YouTube video length.
 - Confirm `model_version` is `audio-features-librosa-v0.3-section-dynamics`.
 - Check min/median/max intensity and a handful of high-intensity timestamps.
 - Compare peaks against obvious musical peaks and the 13:53 tracklist intro
   offset.
-- Do **not** paste into `src/concert-profile.js` until the curve looks sane.
+- Do **not** paste dense generated curves into `src/concert-profile.js`.
+  Put generated payloads in a dedicated module such as
+  `src/audio-derived-curves.js`, then register/select them through
+  `src/library/intensity-curves.js`.
 
 Recommended follow-up if the curve is hard to inspect: add a tiny summary mode
 to `build_profile.py` or a separate script that prints duration, sample step,
@@ -434,9 +543,12 @@ because it resolves to `npm.ps1`; use the direct Node command above.
 
 Current validation performed:
 
-- `node --test tests/*.test.mjs` passes: 40/40.
+- `node --test tests/*.test.mjs` passes: 62/62.
 - `node --check src\app.js` passes.
-- `node --check src\concert-profile.js` passes.
+- `node --check src\erg-controller.js` passes.
+- `node --check src\chart-window.js` passes.
+- `node --check src\intensity-sampling.js` passes.
+- `node --check src\subjective-intensity.js` passes.
 - Static files served successfully from `http://127.0.0.1:8430`.
 - Headless Chrome loaded `http://127.0.0.1:8430` after the terrain TSS startup
   regression was fixed.
@@ -463,12 +575,35 @@ round-trip to discover.
 - **F2** anywhere on the page toggles the overlay. Works regardless of focus.
 - Inside the overlay: digits **1-5** send the preset tag immediately;
   **Esc** cancels; **Enter** sends the typed tag + note.
+- Preset buttons and digit hotkeys now preserve the current note text. A prior
+  bug sent only `tag: "marker"` when using presets/hotkeys, even if the note
+  box had text. That is fixed in `src/app.js`; refresh the browser so
+  `src/app.js?v=annotation-notes-1` is loaded before doing more annotation
+  sessions.
 - Sidecar replies with a `rider_annotation` envelope; the app pins the
   *current video time* at receipt (not WS RTT) so chart markers land at the
   rider's actual ride position.
 - Markers render as dashed amber verticals + a small triangle at the top of
   the ride chart. Density is glanceable; precise inspection comes from the
   JSONL recording.
+- Current limitation: annotations require the sidecar WebSocket. Without the
+  sidecar, F2 shows "sidecar not connected" and nothing is persisted. Offline
+  browser-local annotations plus JSON export are the next useful tuning feature.
+- Current limitation: hovering near an annotation marker does not yet show its
+  tag/note in the chart tooltip. The markers draw, but tooltip integration is
+  still pending.
+- Current UX gotcha (issue #4): pressing a preset digit (1-5) inside the
+  overlay auto-submits immediately. To attach a note to a preset tag the rider
+  must type the note *first* and *then* press the digit. Riders who reach for
+  the digit first (its label names the tag) lose the qualitative context.
+  Validated 2026-05-27 smoke test in
+  `repos/sidecar/docs/recordings/f2-smoke-test.jsonl`.
+- Recovery note: `repos/sidecar/docs/recordings/music-tuning-01.jsonl` did not
+  persist the user's typed semantic notes because it was recorded before the
+  preset/hotkey note fix. The file still preserves 41 Motor Spirit marker
+  timestamps plus v0.4 intensity/audio-feature context, so it can be used as a
+  re-entry scaffold, but the original note text is not recoverable from the
+  JSONL/CSV artifacts.
 - F2 context now includes `profile_id`, `profile_version`,
   `intensity_model_version`, `mode`, `video_id`, `section`,
   `estimated_intensity`, target/live power, cadence, HR, W/kg, and

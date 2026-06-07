@@ -19,6 +19,9 @@ export class ErgWorkoutController {
     this.weightKg = Math.max(1, Number(options.weightKg ?? 75));
     this.modeId = options.modeId ?? "raw_feel";
     this.warmupMinutes = Number(options.warmupMinutes ?? 15);
+    this.intensitySource = options.intensitySource ?? "cues";
+    this.intensityBlend = Number(options.intensityBlend ?? 0.65);
+    this.intensitySeries = normalizeIntensitySeries(options.intensitySeries);
     this._lastSentWatts = null;
     this._lastWriteAtMs = -Infinity;
     this._lastPlaybackTime = 0;
@@ -45,6 +48,18 @@ export class ErgWorkoutController {
     }
   }
 
+  setIntensitySource({ intensitySource, intensityBlend, intensitySeries } = {}) {
+    if (intensitySource != null) {
+      this.intensitySource = String(intensitySource);
+    }
+    if (intensityBlend != null) {
+      this.intensityBlend = Number(intensityBlend);
+    }
+    if (intensitySeries !== undefined) {
+      this.intensitySeries = normalizeIntensitySeries(intensitySeries);
+    }
+  }
+
   resetWrites() {
     this._lastSentWatts = null;
     this._lastWriteAtMs = -Infinity;
@@ -68,7 +83,9 @@ export class ErgWorkoutController {
 
   _rawTargetFromCue(time, cue, previous) {
     const basePct = clamp(cue.ftp_pct, 0, this.options.maxFtpPct);
-    const targetPct = this._rampedPct(time, cue, previous, basePct);
+    const authoredPct = this._rampedPct(time, cue, previous, basePct);
+    const { intensity: rawFeelIntensity, source } = this._rawFeelIntensityAt(time, authoredPct);
+    const targetPct = rawFeelIntensity ?? authoredPct;
     const musicBpm = Number(cue.music_bpm ?? cue.bpm);
     return {
       ftpPct: targetPct,
@@ -77,7 +94,73 @@ export class ErgWorkoutController {
       musicBpm: Math.round(musicBpm),
       label: cue.label,
       cue,
+      intensitySource: source,
     };
+  }
+
+  _rawFeelIntensityAt(time, authoredPct) {
+    if (this.modeId !== "raw_feel") {
+      return { intensity: null, source: "cues" };
+    }
+    if (this.intensitySource === "derived") {
+      const derived = this._selectedIntensityAt(time);
+      return { intensity: derived, source: derived == null ? "cues" : "derived" };
+    }
+    if (this.intensitySource === "blended") {
+      const derived = this._selectedIntensityAt(time);
+      if (derived == null) {
+        return { intensity: null, source: "cues" };
+      }
+      return {
+        intensity: clamp(lerp(authoredPct, derived, clamp(this.intensityBlend, 0, 1)), 0, this.options.maxFtpPct),
+        source: "blended",
+      };
+    }
+    return { intensity: null, source: "cues" };
+  }
+
+  _derivedIntensityAt(time) {
+    const curve = this.profile.derived_intensity_curve;
+    if (!curve || !Array.isArray(curve.points)) {
+      return null;
+    }
+    let current = null;
+    for (const point of curve.points) {
+      const pointTime = Number(point.t);
+      if (!Number.isFinite(pointTime)) {
+        continue;
+      }
+      if (pointTime > time) {
+        break;
+      }
+      current = point;
+    }
+    if (!current) {
+      return null;
+    }
+    const intensity = Number(current.intensity);
+    if (!Number.isFinite(intensity)) {
+      return null;
+    }
+    return clamp(intensity, 0, this.options.maxFtpPct);
+  }
+
+  _selectedIntensityAt(time) {
+    if (this.intensitySeries.length > 0) {
+      return this._seriesIntensityAt(time);
+    }
+    return this._derivedIntensityAt(time);
+  }
+
+  _seriesIntensityAt(time) {
+    let current = null;
+    for (const point of this.intensitySeries) {
+      if (point.t > time) {
+        break;
+      }
+      current = point;
+    }
+    return current ? clamp(current.intensity, 0, this.options.maxFtpPct) : null;
   }
 
   pauseTarget(videoTimeS) {
@@ -180,6 +263,19 @@ export function targetMaintained(actualPower, actualCadence, target) {
   const powerOk = Number(actualPower) >= target.watts * 0.95;
   const cadenceOk = Number(actualCadence) >= target.cadenceRpm - 5;
   return { powerOk, cadenceOk, maintained: powerOk && cadenceOk };
+}
+
+function normalizeIntensitySeries(points) {
+  if (!Array.isArray(points)) {
+    return [];
+  }
+  return points
+    .map((point) => ({
+      t: Number(point.t ?? point.timeS),
+      intensity: Number(point.intensity),
+    }))
+    .filter((point) => Number.isFinite(point.t) && Number.isFinite(point.intensity))
+    .sort((a, b) => a.t - b.t);
 }
 
 function lerp(a, b, t) {

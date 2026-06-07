@@ -9,7 +9,7 @@
 export const CLIENT_ID = "gizzERG";
 
 // Tag presets and their hotkeys. Hotkey is the digit pressed while the overlay
-// is open; tag is sent immediately with no note. The five preset slots bias
+// is open; tag is sent immediately with the current note text. The five preset slots bias
 // toward the model-training feedback loop (per `concert-mode-exploration.md`
 // in the engine repo) — that's the primary purpose of F2 annotations once
 // terrain mode lands. Less-frequent tags (ui-pause, walk-away, false-intensity,
