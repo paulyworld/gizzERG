@@ -7,7 +7,7 @@ import {
 } from "./annotations.js";
 import { concertProfiles } from "./concert-profile.js?v=subjective-v0.4-1";
 import { ErgWorkoutController, formatTime, targetMaintained } from "./erg-controller.js?v=sampled-targets-1";
-import { buildExtremaPreservingSeries } from "./intensity-sampling.js";
+import { applySymmetricSmoothing, buildExtremaPreservingSeries } from "./intensity-sampling.js";
 import {
   CHART_RANGE_OPTIONS,
   chartWindowFor,
@@ -65,6 +65,7 @@ const els = {
   timelineSeekToggle: document.querySelector("#timelineSeekToggle"),
   songDivisionsToggle: document.querySelector("#songDivisionsToggle"),
   blendedIntensityToggle: document.querySelector("#blendedIntensityToggle"),
+  authoredCuesToggle: document.querySelector("#authoredCuesToggle"),
   chartRangeSelect: document.querySelector("#chartRangeSelect"),
   chartRangeLabel: document.querySelector("#chartRangeLabel"),
   chartSelectionToggle: document.querySelector("#chartSelectionToggle"),
@@ -79,6 +80,8 @@ const els = {
   songStrip: document.querySelector("#songStrip"),
   profileSelect: document.querySelector("#profileSelect"),
   curveSelect: document.querySelector("#curveSelect"),
+  intensitySmoothing: document.querySelector("#intensitySmoothing"),
+  intensitySmoothingOut: document.querySelector("#intensitySmoothingOut"),
   ftpInput: document.querySelector("#ftpInput"),
   workoutModeSelect: document.querySelector("#workoutModeSelect"),
   weightInput: document.querySelector("#weightInput"),
@@ -163,6 +166,12 @@ let customChartSelection = defaultCustomChartSelection();
 populateChartRangeSelect();
 populateProfileSelect();
 populateCurveSelect();
+syncIntensitySmoothingOutput();
+// populateCurveSelect restored the dropdown to the persisted choice, but
+// profile/controller above were built with the default curve. Activate now
+// so the restored selection actually loads — otherwise the dropdown shows
+// the right thing while the loaded curve is still the default.
+activateSelectedProfile({ reloadVideo: false });
 renderProfileMetadata({ resetTimingInputs: true });
 for (const mode of workoutModes) {
   const option = document.createElement("option");
@@ -188,6 +197,7 @@ els.timelineSeekToggle.addEventListener("change", () => {
 });
 els.songDivisionsToggle.addEventListener("change", drawRideChart);
 els.blendedIntensityToggle.addEventListener("change", drawRideChart);
+els.authoredCuesToggle.addEventListener("change", drawRideChart);
 els.chartRangeSelect.addEventListener("change", () => {
   renderSongStrip();
   drawRideChart();
@@ -252,7 +262,16 @@ els.profileSelect.addEventListener("change", () => {
   activateSelectedProfile({ reloadVideo: true });
 });
 els.curveSelect.addEventListener("change", () => {
+  persistCurveSelection();
   activateSelectedProfile({ reloadVideo: false });
+});
+els.intensitySmoothing.addEventListener("input", () => {
+  syncIntensitySmoothingOutput();
+  syncControllerIntensitySource();
+  controller.resetWrites();
+  renderTarget(controller.targetAt(latestVideoTime));
+  drawRideChart();
+  tick(true);
 });
 
 for (const input of [els.ftpInput, els.weightInput, els.maxTargetInput]) {
@@ -409,14 +428,42 @@ function curveOptionsFor(candidate) {
 function populateCurveSelect() {
   const baseProfile = concertProfiles[Number(els.profileSelect.value) || 0] ?? concertProfiles[0];
   els.curveSelect.innerHTML = "";
-  for (const optionConfig of curveOptionsFor(baseProfile)) {
+  const options = curveOptionsFor(baseProfile);
+  for (const optionConfig of options) {
     const option = document.createElement("option");
     option.value = optionConfig.id;
     option.textContent = optionConfig.label;
     option.title = optionConfig.curve?.note ?? optionConfig.curve?.model_version ?? "";
     els.curveSelect.append(option);
   }
-  els.curveSelect.value = curveOptionsFor(baseProfile)[0]?.id ?? "default";
+  const stored = readStoredCurveSelection(baseProfile.video_id);
+  const fallback = options[0]?.id ?? "default";
+  const initial = stored && options.some((o) => o.id === stored) ? stored : fallback;
+  els.curveSelect.value = initial;
+}
+
+function curveSelectionStorageKey(videoId) {
+  return `gizzERG:curveSelection:${videoId ?? "default"}`;
+}
+
+function readStoredCurveSelection(videoId) {
+  try {
+    return window.localStorage?.getItem(curveSelectionStorageKey(videoId));
+  } catch {
+    return null;
+  }
+}
+
+function persistCurveSelection() {
+  const baseProfile = concertProfiles[Number(els.profileSelect.value) || 0] ?? concertProfiles[0];
+  try {
+    window.localStorage?.setItem(
+      curveSelectionStorageKey(baseProfile?.video_id),
+      els.curveSelect.value,
+    );
+  } catch {
+    // ignore — localStorage may be disabled
+  }
 }
 
 function selectedProfile() {
@@ -687,7 +734,9 @@ function renderTarget(target) {
   renderPowerCadenceMetric(target);
   els.targetPct.textContent = `${Math.round(target.ftpPct * 100)}%`;
   els.sectionLabel.textContent = target.label;
-  els.guidanceText.textContent = `${target.modeLabel}: ${target.musicBpm} music BPM, ride ${target.cadenceRpm} rpm, ${target.wkg.toFixed(2)} W/kg target.`;
+  const liveBpm = audioBpmAt(latestVideoTime);
+  const bpmText = liveBpm != null ? `${Math.round(liveBpm)} music BPM` : `${target.musicBpm} music BPM`;
+  els.guidanceText.textContent = `${target.modeLabel}: ${bpmText}, ride ${target.cadenceRpm} rpm, ${target.wkg.toFixed(2)} W/kg target.`;
   renderTerrainSummary();
   const track = trackAt(latestVideoTime);
   els.trackLabel.textContent = track
@@ -952,7 +1001,7 @@ function derivedIntensityPoints() {
   if (!Array.isArray(points)) {
     return [];
   }
-  return points
+  const normalized = points
     .map((point) => ({
       ...point,
       t: Number(point.t),
@@ -960,6 +1009,16 @@ function derivedIntensityPoints() {
     }))
     .filter((point) => Number.isFinite(point.t) && Number.isFinite(point.intensity))
     .sort((a, b) => a.t - b.t);
+  return applySymmetricSmoothing(normalized, intensitySmoothingWindowS());
+}
+
+function intensitySmoothingWindowS() {
+  return Math.max(0, Number(els.intensitySmoothing?.value) || 0);
+}
+
+function syncIntensitySmoothingOutput() {
+  const value = intensitySmoothingWindowS();
+  els.intensitySmoothingOut.textContent = value === 0 ? "off" : `${Math.round(value)}s`;
 }
 
 function derivedIntensityAt(timeS) {
@@ -972,6 +1031,49 @@ function derivedIntensityAt(timeS) {
     if (point.t > timeS) {
       break;
     }
+    current = point;
+  }
+  return current;
+}
+
+// Per-window BPM from audio_features when the active curve carries it
+// (v0.3 / v0.4 after BPM extraction). Returns null otherwise so callers
+// can fall back to the per-section cue.bpm.
+//
+// Smoothing reuses the intensity-smoothing window so a single slider
+// controls both signals consistently. Per-frame tempo from librosa is
+// noisy at sub-second resolution — smoothing makes the BPM line track
+// musical phrases rather than estimator jitter.
+function audioBpmAt(timeS) {
+  const points = derivedIntensityPoints();
+  if (points.length === 0) {
+    return null;
+  }
+  const window = intensitySmoothingWindowS();
+  if (window === 0) {
+    const point = nearestPointAtOrBefore(points, timeS);
+    const bpm = Number(point?.audio_features?.bpm);
+    return Number.isFinite(bpm) && bpm > 0 ? bpm : null;
+  }
+  const half = window / 2;
+  let sum = 0;
+  let count = 0;
+  for (const point of points) {
+    if (point.t < timeS - half) continue;
+    if (point.t > timeS + half) break;
+    const bpm = Number(point.audio_features?.bpm);
+    if (Number.isFinite(bpm) && bpm > 0) {
+      sum += bpm;
+      count += 1;
+    }
+  }
+  return count > 0 ? sum / count : null;
+}
+
+function nearestPointAtOrBefore(points, timeS) {
+  let current = points[0];
+  for (const point of points) {
+    if (point.t > timeS) break;
     current = point;
   }
   return current;
@@ -1119,6 +1221,9 @@ function drawRideChart() {
   drawTerrainProfile(ctx, plotLeft, plotWidth, plotArea);
   drawIntensityGuideLines(ctx, plotLeft, plotWidth, plotArea, maxPower);
   drawDerivedIntensityCurve(ctx, plotLeft, plotWidth, plotArea, maxPower);
+  if (els.authoredCuesToggle.checked) {
+    drawAuthoredCuesCurve(ctx, plotLeft, plotWidth, plotArea, maxPower);
+  }
   if (els.blendedIntensityToggle.checked) {
     drawBlendedIntensityCurve(ctx, plotLeft, plotWidth, plotArea);
   }
@@ -1218,8 +1323,8 @@ function drawMusicBpmCurve(ctx, plotLeft, plotWidth, area, minMusicBpm, maxMusic
   ctx.beginPath();
   for (let x = plotLeft; x <= plotLeft + plotWidth; x += 4) {
     const time = xToTimeInWindow(x, plotLeft, plotWidth, chartWindow);
-    const target = controller.targetAt(time);
-    const y = musicBpmToY(target.musicBpm, area, minMusicBpm, maxMusicBpm);
+    const bpm = audioBpmAt(time) ?? controller.targetAt(time).musicBpm;
+    const y = musicBpmToY(bpm, area, minMusicBpm, maxMusicBpm);
     if (x === plotLeft) {
       ctx.moveTo(x, y);
     } else {
@@ -1385,6 +1490,53 @@ function drawDerivedIntensityCurve(ctx, plotLeft, plotWidth, area, maxPower) {
   ctx.strokeStyle = "rgba(34, 211, 238, 0.98)";
   ctx.lineWidth = 2.3;
   ctx.setLineDash([2, 6]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+// Authored cues line: renders profile.cues as a step function on the same
+// power-axis as the derived overlay so they're directly comparable. Useful
+// when tuning the blend slider — you can see the authored baseline next to
+// the rider-tuned derived curve and the blended target the trainer follows.
+function drawAuthoredCuesCurve(ctx, plotLeft, plotWidth, area, maxPower) {
+  const cues = Array.isArray(profile.cues) ? profile.cues : [];
+  if (cues.length < 2) {
+    return;
+  }
+  const chartWindow = currentChartWindow();
+  const cuePoints = cues
+    .map((cue) => ({ t: Number(cue.t), intensity: Number(cue.ftp_pct) }))
+    .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.intensity))
+    .sort((a, b) => a.t - b.t);
+  const points = visibleStepPoints(cuePoints, (point) => point.t, chartWindow);
+  if (points.length < 2) {
+    return;
+  }
+  ctx.beginPath();
+  let previousY = null;
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index];
+    const x = timeToX(point.t, plotLeft, plotWidth);
+    const y = derivedIntensityToY(point.intensity, area, maxPower);
+    if (index === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, previousY);
+      ctx.lineTo(x, y);
+    }
+    previousY = y;
+  }
+  const finalX = timeToX(chartWindow.endS, plotLeft, plotWidth);
+  ctx.lineTo(finalX, previousY);
+  ctx.save();
+  ctx.strokeStyle = "rgba(3, 7, 18, 0.92)";
+  ctx.lineWidth = 4.0;
+  ctx.setLineDash([3, 8]);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(244, 114, 182, 0.95)"; // rose-400 — distinct from cyan derived and green blended
+  ctx.lineWidth = 1.8;
+  ctx.setLineDash([3, 8]);
   ctx.stroke();
   ctx.setLineDash([]);
   ctx.restore();
@@ -1660,7 +1812,7 @@ function updateRideChartTooltip(event, time) {
     <span>Song: ${track ? `${track.index + 1}. ${escapeHtml(track.title)}` : "not aligned"}</span>
     <span>Target: ${target.watts} W (${Math.round(target.ftpPct * 100)}% FTP), ${target.cadenceRpm} rpm</span>
     <span>Mode: ${escapeHtml(target.modeLabel ?? "Workout")}${target.planBlock ? ` / ${escapeHtml(target.planBlock)}` : ""}</span>
-    <span>Music BPM: ${target.musicBpm}</span>
+    <span>Music BPM: ${(() => { const b = audioBpmAt(time); return b != null ? `${Math.round(b)} (per-window)` : `${target.musicBpm} (per-section)`; })()}</span>
     <span>${derivedIntensityLabel()}: ${derived ? `${Math.round(derived.intensity * 100)}%` : "not available"}</span>
     <span>Terrain source: ${escapeHtml(terrainSourceDisplayLabel())}</span>
     <span>Blended terrain intensity: ${Math.round(blendedIntensity * 100)}%</span>

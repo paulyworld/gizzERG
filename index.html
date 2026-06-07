@@ -39,6 +39,10 @@
               <input id="blendedIntensityToggle" type="checkbox" checked>
               intensity
             </label>
+            <label class="timeline-seek-toggle" title="Overlay the authored cue map (profile.cues) so you can compare it to the selected derived curve and the blended target.">
+              <input id="authoredCuesToggle" type="checkbox">
+              cues
+            </label>
             <label class="chart-range-control">
               <span>range</span>
               <select id="chartRangeSelect"></select>
@@ -110,6 +114,11 @@
             <option value="manual-seed">Manual seed</option>
             <option value="audio-v0.3-20m">Audio v0.3 preview (13:53-33:53)</option>
           </select>
+        </label>
+        <label title="Symmetric moving-average window applied to the intensity curve. Higher values soften dense audio peaks/troughs in the target-power line. 0 disables smoothing.">
+          <span>Intensity smoothing</span>
+          <input id="intensitySmoothing" type="range" min="0" max="60" step="1" value="0">
+          <output id="intensitySmoothingOut">0s</output>
         </label>
         <label>
           <span>FTP</span>

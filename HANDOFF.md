@@ -2,14 +2,30 @@
 
 > Browser-based ERG controller experiment for the YouTube concert ride.
 
-**Last updated:** 2026-05-27
-**Current branch:** `develop`
+**Last updated:** 2026-06-06
+**Current branch:** `feat/full-concert-curves-tuning-controls`
 **Current focus:** Music-intensity review and tuning UI for gizzERG. The app
-now supports selectable curve versions, a v0.4 subjective-feel preview curve,
+now supports selectable curve versions, a v0.4 subjective-feel curve,
 zoomable/tall timeline review, sidecar-backed F2 annotations, and Raw Feel
 target power driven by sampled derived/blended intensity. Terrain controls are
 still a dev/test surface, but they now affect the shaded target-power path when
 Raw Feel uses `Derived intensity` or `Blended`.
+
+**2026-06-06 update — tuning controls + full-concert curves landed:**
+
+| Area | What landed |
+|---|---|
+| **Full-concert audio extraction** | v0.3 / v0.4 now cover 833→end of the concert (3974 points at 2s sample step). Manual-seed splice removed for t≥833 — audio extraction is the sole source past the warmup intro. Constants renamed: `bnnIdWzGSYISectionDynamics20m` → `bnnIdWzGSYIAudioFeaturesFull`; exposed via `bnnIdWzGSYIAudioFeaturesV03` + `bnnIdWzGSYISubjectiveV04`. Library ids: `audio-v0.3-20m`/`audio-v0.4-subjective-20m` → `audio-v0.3`/`audio-v0.4-subjective`. |
+| **Per-window BPM** | `tools/profile-builder/build_profile.py` calls `librosa.feature.tempo(..., aggregate=None)` per chunk; `bpm` lands unnormalized in `audio_features`. Range observed: 68-172 BPM (median 112). Chart's BPM line, guidance text, and hover tooltip prefer per-window BPM via `audioBpmAt(time)`; fall back to per-section `cue.bpm` when the active curve has no audio data. Tooltip labels source as `(per-window)` vs `(per-section)`. |
+| **Default metal style segments** | v0.4 `styleSegments` extended beyond Gila/Motor Spirit: The Balrog (0.40), Iron Lung (0.35, label `heavy`), Evil Death Roll (0.50, label `thrash`), Hog Calling Contest (0.40). Unsegmented songs still get `style_prior = 0` — extend the list in `src/library/intensity-curves.js` as you tune more sections. |
+| **Rider-tuned manual seed v0.2** | New `bnnIdWzGSYIManualSeedV02Curve` (`model_version: manual-seed-v0.2-motorspirit-mindfuzz`) — 26 dense anchor points across t=1607-2036 derived from F2 annotations in `repos/sidecar/docs/recordings/semantic-test-02.jsonl`. Outside that window inherits v0.1. Selectable via `manual-seed-v0.2` library id. |
+| **Intensity smoothing slider** | New 0-60s symmetric centered moving-average. Default off (preserves extrema). Applied at `derivedIntensityPoints()` so it affects chart overlay, controller target series, F2 annotation context, *and* the BPM line — single knob, consistent everywhere. |
+| **Authored Cues chart overlay** | New `cues` toggle in the chart header. Renders `profile.cues` as a rose-magenta step line on the same power-axis as the cyan derived overlay. Lets you compare authored / derived / blended at a glance while tuning the blend slider. |
+| **Curve dropdown persistence** | LocalStorage-keyed per video id (`gizzERG:curveSelection:<videoId>`). Falls back to first option gracefully when the stored id no longer exists. Boot-time init reorder fixed: `activateSelectedProfile({ reloadVideo: false })` now runs after `populateCurveSelect()` so the restored choice *actually loads* (was a dropdown-only restore before). |
+
+## ⚠️ Known UX gotcha (gizzERG issue #4)
+
+Pressing a preset digit (1-5) inside the F2 overlay auto-submits immediately. To attach a note to a preset tag, type the note *first*, then press the digit. Riders who reach for the digit first lose the qualitative context. Validated 2026-05-27 smoke test (`repos/sidecar/docs/recordings/f2-smoke-test.jsonl`); filed at https://github.com/paulyworld/gizzERG/issues/4 with three suggested fixes.
 
 ## Current Shape
 
@@ -576,6 +592,12 @@ round-trip to discover.
 - Current limitation: hovering near an annotation marker does not yet show its
   tag/note in the chart tooltip. The markers draw, but tooltip integration is
   still pending.
+- Current UX gotcha (issue #4): pressing a preset digit (1-5) inside the
+  overlay auto-submits immediately. To attach a note to a preset tag the rider
+  must type the note *first* and *then* press the digit. Riders who reach for
+  the digit first (its label names the tag) lose the qualitative context.
+  Validated 2026-05-27 smoke test in
+  `repos/sidecar/docs/recordings/f2-smoke-test.jsonl`.
 - Recovery note: `repos/sidecar/docs/recordings/music-tuning-01.jsonl` did not
   persist the user's typed semantic notes because it was recorded before the
   preset/hotkey note fix. The file still preserves 41 Motor Spirit marker

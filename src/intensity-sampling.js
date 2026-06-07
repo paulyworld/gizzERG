@@ -56,6 +56,46 @@ function uniquePointsByTime(points) {
   return out;
 }
 
+// Symmetric (centered) moving-average smoothing across a time window, in
+// seconds. Designed for non-uniformly-sampled intensity series — for each
+// input point, averages every other point whose timestamp lies within
+// windowS/2 of the anchor. Returns the input unchanged if windowS <= 0 or
+// the series is empty. Symmetric rather than causal so peaks don't drift in
+// time when smoothed.
+export function applySymmetricSmoothing(series, windowS) {
+  const window = Math.max(0, Number(windowS) || 0);
+  if (window === 0 || !Array.isArray(series) || series.length === 0) {
+    return series;
+  }
+  const half = window / 2;
+  const out = [];
+  let lo = 0;
+  let hi = 0;
+  for (let i = 0; i < series.length; i++) {
+    const t = series[i].t;
+    while (lo < series.length && series[lo].t < t - half) {
+      lo += 1;
+    }
+    if (hi < lo) {
+      hi = lo;
+    }
+    while (hi < series.length && series[hi].t <= t + half) {
+      hi += 1;
+    }
+    let sum = 0;
+    let count = 0;
+    for (let j = lo; j < hi; j++) {
+      sum += series[j].intensity;
+      count += 1;
+    }
+    out.push({
+      ...series[i],
+      intensity: count > 0 ? sum / count : series[i].intensity,
+    });
+  }
+  return out;
+}
+
 function pushPoint(points, point) {
   const last = points.at(-1);
   if (last && last.t === point.t) {

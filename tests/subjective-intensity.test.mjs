@@ -118,5 +118,5 @@ test("style priors can lift active metal sections without lifting quiet passages
 test("concert profile exposes v0.4 subjective preview as a selectable curve", () => {
   const ids = concertProfiles[0].available_intensity_curves.map((curve) => curve.id);
 
-  assert.ok(ids.includes("audio-v0.4-subjective-20m"));
+  assert.ok(ids.includes("audio-v0.4-subjective"));
 });
