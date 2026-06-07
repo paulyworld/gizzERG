@@ -72,6 +72,28 @@ export class ErgWorkoutController {
     const target = structuredTargetAt(rawTarget, time, this.profile.duration_s, this.modeId, {
       warmupMinutes: this.warmupMinutes,
     });
+    const gap = this._breakGapAt(time);
+    if (gap) {
+      // Music ended within this song but the authored boundary hasn't been
+      // reached yet — banter, applause, intermission. Drop the trainer to
+      // easy-spin (pauseFtpPct) for the gap so the rider gets recovery
+      // rather than holding the per-section target through silence.
+      const breakPct = clamp(this.options.pauseFtpPct, 0, this.options.maxFtpPct);
+      const breakWatts = Math.round(
+        clamp(breakPct * this.ftp, this.options.minWatts, this.options.maxWatts),
+      );
+      return {
+        ...target,
+        ftpPct: breakPct,
+        watts: breakWatts,
+        cadenceRpm: Math.round(this.options.pauseCadenceRpm),
+        wkg: breakWatts / this.weightKg,
+        label: `${target.label} → break`,
+        intensitySource: "break-gap",
+        inBreakGap: true,
+        breakGap: gap,
+      };
+    }
     const watts = Math.round(clamp(target.ftpPct * this.ftp, this.options.minWatts, this.options.maxWatts));
     return {
       ...target,
@@ -79,6 +101,29 @@ export class ErgWorkoutController {
       cadenceRpm: Math.round(target.cadenceRpm),
       wkg: watts / this.weightKg,
     };
+  }
+
+  // Detect whether we're inside a music-ended-but-song-not-over gap. Walks
+  // profile.tracks (sparse — most tracks don't carry `music_end_offset_s`
+  // because they segue continuously). Returns { from, to, trackTitle } when
+  // in a gap, null otherwise.
+  _breakGapAt(time) {
+    const tracks = this.profile.tracks;
+    if (!Array.isArray(tracks) || tracks.length === 0) return null;
+    let cursor = Number(this.profile.tracklist_intro_offset_s) || 0;
+    for (const track of tracks) {
+      const start = cursor;
+      const end = start + Number(track.duration_s);
+      const musicEndOffset = Number(track.music_end_offset_s);
+      if (Number.isFinite(musicEndOffset) && musicEndOffset > 0) {
+        const musicEnd = start + musicEndOffset;
+        if (time >= musicEnd && time < end) {
+          return { from: musicEnd, to: end, trackTitle: track.title };
+        }
+      }
+      cursor = end;
+    }
+    return null;
   }
 
   _rawTargetFromCue(time, cue, previous) {
