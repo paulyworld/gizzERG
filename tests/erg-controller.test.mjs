@@ -249,3 +249,60 @@ test("actual ride analysis summarizes TSS and compliance", () => {
   assert.equal(Math.round(compliance.powerMaintainedPct * 100), 67);
   assert.equal(Math.round(compliance.cadenceMaintainedPct * 100), 67);
 });
+
+// --- music-end break-gap detection -----------------------------------------
+
+const breakGapProfile = {
+  title: "break gap test",
+  duration_s: 600,
+  tracklist_intro_offset_s: 0,
+  tracks: [
+    { title: "Song A", duration_s: 200 },                            // 0-200, no gap (segue)
+    { title: "Song B", duration_s: 200, music_end_offset_s: 180 },   // 200-400, music ends at 380
+    { title: "Song C", duration_s: 200 },                            // 400-600, no gap
+  ],
+  cues: [
+    { t: 0, label: "Song A", bpm: 120, ftp_pct: 0.80, cadence_rpm: 90, ramp_s: 5 },
+    { t: 200, label: "Song B", bpm: 130, ftp_pct: 0.90, cadence_rpm: 95, ramp_s: 5 },
+    { t: 400, label: "Song C", bpm: 110, ftp_pct: 0.70, cadence_rpm: 85, ramp_s: 5 },
+  ],
+};
+
+test("targetAt holds normal target inside a song with no gap", () => {
+  const controller = new ErgWorkoutController(breakGapProfile, { ftp: 250 });
+  const target = controller.targetAt(100); // mid Song A — no music_end_offset_s
+  assert.equal(target.inBreakGap, undefined);
+  assert.equal(target.label, "Song A");
+  assert.ok(target.watts > 150); // ~200W expected at 0.80 FTP
+});
+
+test("targetAt drops to pause floor and flags inBreakGap during a music-end gap", () => {
+  const controller = new ErgWorkoutController(breakGapProfile, { ftp: 250 });
+  const target = controller.targetAt(390); // inside Song B's break gap (380-400)
+  assert.equal(target.inBreakGap, true);
+  assert.ok(target.label.endsWith("→ break"));
+  assert.equal(target.intensitySource, "break-gap");
+  // pauseFtpPct defaults to 0.45; floor target should be lower than the
+  // mid-song 0.90 target Song B would produce here.
+  assert.ok(target.watts < 130);
+  assert.deepEqual(target.breakGap, {
+    from: 380,
+    to: 400,
+    trackTitle: "Song B",
+  });
+});
+
+test("targetAt resumes normal target on the next song after a break gap", () => {
+  const controller = new ErgWorkoutController(breakGapProfile, { ftp: 250 });
+  const target = controller.targetAt(410); // start of Song C, after the gap
+  assert.equal(target.inBreakGap, undefined);
+  assert.equal(target.label, "Song C");
+});
+
+test("targetAt ignores tracks without music_end_offset_s (continuous segue)", () => {
+  const controller = new ErgWorkoutController(breakGapProfile, { ftp: 250 });
+  // Right at Song A's authored end, before Song B's ramp finishes. Should
+  // still be a normal target — Song A has no music_end_offset_s.
+  const target = controller.targetAt(199);
+  assert.equal(target.inBreakGap, undefined);
+});
