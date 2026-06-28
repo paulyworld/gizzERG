@@ -25,6 +25,7 @@ export const TAG_PRESETS = [
 const MAX_TAG_LEN = 64;
 const MAX_NOTE_LEN = 280;
 const MAX_CLIENT_ID_LEN = 64;
+const MIN_RANGE_DURATION_S = 1;
 
 /**
  * Build the wire payload for an `annotate` command. Returns the object —
@@ -99,6 +100,34 @@ export function presetForHotkey(key) {
   return TAG_PRESETS.find((p) => p.key === key) ?? null;
 }
 
+/** Normalize a range annotation span. Returns null when the span is not useful. */
+export function normalizeAnnotationRange(startS, endS) {
+  if (!Number.isFinite(startS) || !Number.isFinite(endS)) {
+    return null;
+  }
+  const start = Math.max(0, Math.min(startS, endS));
+  const end = Math.max(0, Math.max(startS, endS));
+  if (end - start < MIN_RANGE_DURATION_S) {
+    return null;
+  }
+  return {
+    start_s: start,
+    end_s: end,
+    duration_s: end - start,
+  };
+}
+
+/** Pull range metadata back out of an echoed rider_annotation context blob. */
+export function annotationRangeFromContext(context) {
+  if (!context || typeof context !== "object" || Array.isArray(context)) {
+    return null;
+  }
+  return normalizeAnnotationRange(
+    Number(context.annotation_range_start_s),
+    Number(context.annotation_range_end_s),
+  );
+}
+
 /**
  * Build a recommended context blob from the current ride snapshot. Mirrors
  * the recommended shape in the sidecar event-schema doc. Fields are
@@ -129,4 +158,5 @@ export const ANNOTATION_LIMITS = Object.freeze({
   MAX_TAG_LEN,
   MAX_NOTE_LEN,
   MAX_CLIENT_ID_LEN,
+  MIN_RANGE_DURATION_S,
 });

@@ -77,7 +77,7 @@
               <input id="chartEndSlider" type="range" min="0" max="3600" value="2033" step="1">
               <output id="chartEndOut">33:53</output>
             </label>
-            <button id="applyChartSelection" type="button">Zoom</button>
+            <button id="applyChartSelection" type="button">Zoom to selection</button>
           </div>
           <canvas id="rideChart" height="210"></canvas>
           <div id="songStrip" class="song-strip" aria-label="Song timeline"></div>
@@ -306,6 +306,11 @@
         <span>Note (optional)</span>
         <input id="annotationNoteInput" type="text" maxlength="280"
                placeholder="what's happening?" autocomplete="off">
+      </label>
+      <label class="annotation-range-field">
+        <input id="annotationUseRangeInput" type="checkbox">
+        <span>Tag selected chart range</span>
+        <small id="annotationRangeText">Enable Select on the chart to choose a span.</small>
       </label>
       <div class="annotation-error" id="annotationError" hidden></div>
       <div class="annotation-actions">
