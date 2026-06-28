@@ -294,7 +294,7 @@
       <p class="annotation-hint">
         Press <kbd>1</kbd>-<kbd>5</kbd> to choose a preset tag.
         Type an optional note, then <kbd>Enter</kbd> to send.
-        <kbd>Esc</kbd> cancels.
+        <kbd>Esc</kbd> cancels. Tip: <kbd>Shift</kbd>+drag on the chart to mark a range first.
       </p>
       <div id="annotationPresets" class="annotation-presets"></div>
       <label class="annotation-field">
@@ -307,11 +307,13 @@
         <input id="annotationNoteInput" type="text" maxlength="280"
                placeholder="what's happening?" autocomplete="off">
       </label>
-      <label class="annotation-range-field">
-        <input id="annotationUseRangeInput" type="checkbox">
-        <span>Tag selected chart range</span>
-        <small id="annotationRangeText">Enable Select on the chart to choose a span.</small>
-      </label>
+      <div class="annotation-range-display" id="annotationRangeDisplay" data-state="none">
+        <div class="annotation-range-summary">
+          <span class="annotation-range-icon" aria-hidden="true">⎯</span>
+          <span id="annotationRangeText">No range attached — shift-drag the chart to mark a span.</span>
+          <button id="annotationClearRange" type="button" hidden>Clear</button>
+        </div>
+      </div>
       <div class="annotation-error" id="annotationError" hidden></div>
       <div class="annotation-actions">
         <button id="annotationCancel" type="button">Cancel (Esc)</button>
@@ -320,6 +322,6 @@
     </div>
   </div>
 
-  <script type="module" src="src/app.js?v=annotation-note-flow-2"></script>
+  <script type="module" src="src/app.js?v=range-drag-flow-1"></script>
 </body>
 </html>

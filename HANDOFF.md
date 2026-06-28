@@ -58,6 +58,8 @@ Preset digits/buttons now select the tag into the annotation draft instead of au
 
 **2026-06-27 annotation tooltip update:** Hovering within 5s of a chart annotation marker now shows the nearest annotation's tag, note, and timestamp in the ride chart tooltip. `nearestAnnotationAt(...)` is covered by unit tests. Full validation passes 72/72.
 
+**2026-06-28 range-drag flow (gizzERG issue #12 fix):** Shift+drag anywhere on the ride chart now marks an annotation range and auto-opens the F2 overlay with the range pre-attached. No more dependency on the chart-header `select` toggle for range annotations. The drag is drawn live as a dashed amber box during the gesture. The F2 overlay shows the attached range in a fixed "Range: X → Y (Z) — Clear" pill (no checkbox), or "shift-drag the chart to mark a span" when no range is attached. The chart-Select toggle still works for explicit slider-driven range selection; opening F2 while that toggle is on auto-attaches the slider range. Tests stay at 78/78.
+
 ## Current Shape
 
 - Static browser app served from `repos/concert-mvp`.
