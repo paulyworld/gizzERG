@@ -2,8 +2,8 @@
 
 > Browser-based ERG controller experiment for the YouTube concert ride.
 
-**Last updated:** 2026-06-06
-**Current branch:** `feat/music-end-detection` (off `feat/full-concert-curves-tuning-controls`)
+**Last updated:** 2026-06-27
+**Current branch:** `docs/2026-06-27-reconcile-handoff` (handoff-only; code baseline aligned with `origin/develop` at `9e57784`)
 **Current focus:** Music-intensity review and tuning UI for gizzERG. The app
 now supports selectable curve versions, a v0.4 subjective-feel curve,
 zoomable/tall timeline review, sidecar-backed F2 annotations, and Raw Feel
@@ -43,6 +43,12 @@ Detected gaps (validated where rider notes exist):
 | Set | 8753 | 8719 | 34s | auto-detected (end-of-show applause) |
 
 The detector is conservative: requires ≥6s of sustained low loudness, so brief instrumental dips inside a song don't false-trigger. Re-run `node tools/analyze-music-end.mjs` after any audio re-extraction; bake new offsets into `videos.js` manually based on the output table.
+
+**2026-06-27 update - local develop reconciled:**
+
+- Local `develop` was previously ahead/behind `origin/develop` because two older Codex commits (`2816227`, `29db8ae`) predated the merged full-concert work.
+- Created backup branch `codex-backup-develop-before-reconcile-20260627`, rebased onto `origin/develop`, and skipped those two commits because origin's `3c0187c` + `9e57784` are the newer superset.
+- Current validation: `node --test tests/*.test.mjs` passes 69/69; `node --check src\app.js`, `src\erg-controller.js`, and `src\terrain-model.js` pass.
 
 ## ⚠️ Known UX gotcha (gizzERG issue #4)
 
@@ -354,7 +360,7 @@ proved expensive but functional. Current local validation includes:
   succeeded on this machine.
 - `python -m unittest discover tools\profile-builder\tests` passes.
 - `python -m py_compile tools\profile-builder\build_profile.py` passes.
-- `node --test tests/*.test.mjs` passes: 62/62.
+- `node --test tests/*.test.mjs` passes: 69/69.
 - Synthetic WAV smoke test succeeded:
   `python tools\profile-builder\build_profile.py --audio C:\tmp\gizzerg-smoke.wav --out C:\tmp\gizzerg-smoke-curve.json --sample-step-s 1`
   produced an `audio-features-librosa-v0.1` curve with dense points. Current
@@ -564,7 +570,7 @@ because it resolves to `npm.ps1`; use the direct Node command above.
 
 Current validation performed:
 
-- `node --test tests/*.test.mjs` passes: 62/62.
+- `node --test tests/*.test.mjs` passes: 69/69.
 - `node --check src\app.js` passes.
 - `node --check src\erg-controller.js` passes.
 - `node --check src\chart-window.js` passes.
