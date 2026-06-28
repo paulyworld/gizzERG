@@ -2,6 +2,7 @@ import {
   CLIENT_ID,
   TAG_PRESETS,
   annotationRangeFromContext,
+  applyPresetToDraft,
   buildAnnotateCommand,
   buildContextSnapshot,
   normalizeAnnotationRange,
@@ -2172,7 +2173,7 @@ function populateAnnotationPresets() {
       `<span class="preset-key">${escapeHtml(preset.key)}</span>` +
       `<span class="preset-label">${escapeHtml(preset.label)}</span>` +
       `<span class="preset-hint">${escapeHtml(preset.tag)}</span>`;
-    btn.addEventListener("click", () => sendAnnotation(preset.tag, currentAnnotationNote()));
+    btn.addEventListener("click", () => selectAnnotationPreset(preset));
     els.annotationPresets.append(btn);
   }
 }
@@ -2203,6 +2204,7 @@ function openAnnotationOverlay() {
   els.annotationOverlay.hidden = false;
   els.annotationTagInput.value = "";
   els.annotationNoteInput.value = "";
+  clearSelectedAnnotationPreset();
   syncAnnotationRangeDraft();
   hideAnnotationError();
   // Focus the first preset for hotkey discovery; rider can Tab to inputs.
@@ -2217,6 +2219,7 @@ function closeAnnotationOverlay() {
     return;
   }
   els.annotationOverlay.hidden = true;
+  clearSelectedAnnotationPreset();
   hideAnnotationError();
   if (annotationFocusRestore && document.body.contains(annotationFocusRestore)) {
     annotationFocusRestore.focus();
@@ -2235,17 +2238,40 @@ function onAnnotationOverlayKeyDown(event) {
     submitFromOverlayInputs();
     return;
   }
-  // Digit hotkey: send preset immediately. Skip when the rider is typing
+  // Digit hotkey: select a preset into the draft. Skip when the rider is typing
   // a digit into a tag/note input — otherwise "1" while typing "round 1"
-  // would send instead of inserting.
+  // would select a preset instead of inserting.
   const targetIsInput =
     event.target === els.annotationTagInput || event.target === els.annotationNoteInput;
   if (!targetIsInput) {
     const preset = presetForHotkey(event.key);
     if (preset) {
       event.preventDefault();
-      sendAnnotation(preset.tag, currentAnnotationNote());
+      selectAnnotationPreset(preset);
     }
+  }
+}
+
+function selectAnnotationPreset(preset) {
+  let draft;
+  try {
+    draft = applyPresetToDraft(preset, { note: currentAnnotationNote() });
+  } catch (error) {
+    showAnnotationError(error.message);
+    return;
+  }
+  els.annotationTagInput.value = draft.tag;
+  els.annotationNoteInput.value = draft.note;
+  hideAnnotationError();
+  for (const button of els.annotationPresets.querySelectorAll("button")) {
+    button.classList.toggle("selected", button.dataset.tag === draft.tag);
+  }
+  els.annotationNoteInput.focus();
+}
+
+function clearSelectedAnnotationPreset() {
+  for (const button of els.annotationPresets.querySelectorAll("button")) {
+    button.classList.remove("selected");
   }
 }
 

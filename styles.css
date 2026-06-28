@@ -715,6 +715,11 @@ h1 {
   outline: none;
 }
 
+.annotation-presets button.selected {
+  background: #263f34;
+  border-color: #5fbf7a;
+}
+
 .annotation-presets .preset-key {
   font-size: 11px;
   color: #6ea8ff;

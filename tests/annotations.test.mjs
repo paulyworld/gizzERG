@@ -5,6 +5,7 @@ import {
   CLIENT_ID,
   TAG_PRESETS,
   annotationRangeFromContext,
+  applyPresetToDraft,
   buildAnnotateCommand,
   buildContextSnapshot,
   normalizeAnnotationRange,
@@ -135,6 +136,20 @@ test("annotationRangeFromContext reads echoed range metadata", () => {
 test("annotationRangeFromContext ignores missing range metadata", () => {
   assert.equal(annotationRangeFromContext({ mode: "raw-feel" }), null);
   assert.equal(annotationRangeFromContext(null), null);
+});
+
+test("applyPresetToDraft selects preset tag while preserving note", () => {
+  const draft = applyPresetToDraft(presetForHotkey("2"), {
+    note: "felt easier once vocals entered",
+  });
+  assert.deepEqual(draft, {
+    tag: "too-easy",
+    note: "felt easier once vocals entered",
+  });
+});
+
+test("applyPresetToDraft rejects missing presets", () => {
+  assert.throws(() => applyPresetToDraft(null), /preset is required/);
 });
 
 test("buildContextSnapshot drops undefined and non-finite values", () => {

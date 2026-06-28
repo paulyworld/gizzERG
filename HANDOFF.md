@@ -3,7 +3,7 @@
 > Browser-based ERG controller experiment for the YouTube concert ride.
 
 **Last updated:** 2026-06-27
-**Current branch:** `feat/range-annotations`
+**Current branch:** `fix/f2-annotation-note-flow`
 **Current focus:** Music-intensity review and tuning UI for gizzERG. The app
 now supports selectable curve versions, a v0.4 subjective-feel curve,
 zoomable/tall timeline review, sidecar-backed F2 annotations, and Raw Feel
@@ -48,11 +48,11 @@ The detector is conservative: requires ≥6s of sustained low loudness, so brief
 
 - Local `develop` was previously ahead/behind `origin/develop` because two older Codex commits (`2816227`, `29db8ae`) predated the merged full-concert work.
 - Created backup branch `codex-backup-develop-before-reconcile-20260627`, rebased onto `origin/develop`, and skipped those two commits because origin's `3c0187c` + `9e57784` are the newer superset.
-- Current validation: `node --test tests/*.test.mjs` passes 69/69; `node --check src\app.js`, `src\erg-controller.js`, and `src\terrain-model.js` pass.
+- Current validation: `node --test tests/*.test.mjs` passes 75/75; `node --check src\app.js`, `src\erg-controller.js`, and `src\terrain-model.js` pass.
 
-## ⚠️ Known UX gotcha (gizzERG issue #4)
+## F2 preset note flow fixed (gizzERG issue #4)
 
-Pressing a preset digit (1-5) inside the F2 overlay auto-submits immediately. To attach a note to a preset tag, type the note *first*, then press the digit. Riders who reach for the digit first lose the qualitative context. Validated 2026-05-27 smoke test (`repos/sidecar/docs/recordings/f2-smoke-test.jsonl`); filed at https://github.com/paulyworld/gizzERG/issues/4 with three suggested fixes.
+Preset digits/buttons now select the tag into the annotation draft instead of auto-submitting. The rider can press 1-5, type or edit an optional note, then press Enter/Send. The selected preset is highlighted and the note field receives focus. This closes the ordering trap from issue #4 while preserving the sidecar `annotate` wire shape.
 
 **2026-06-27 range annotation update:** Chart Select mode now supports drag-to-select. The active selection renders as a translucent box, and the F2 overlay can attach the selected start/end range to an annotation. Echoed range annotations draw as labeled boxes across the chart, with tag + note text inside the box. Range metadata rides in the existing `annotate.context` fields, so no sidecar schema change is required.
 
@@ -362,7 +362,7 @@ proved expensive but functional. Current local validation includes:
   succeeded on this machine.
 - `python -m unittest discover tools\profile-builder\tests` passes.
 - `python -m py_compile tools\profile-builder\build_profile.py` passes.
-- `node --test tests/*.test.mjs` passes: 73/73.
+- `node --test tests/*.test.mjs` passes: 75/75.
 - Synthetic WAV smoke test succeeded:
   `python tools\profile-builder\build_profile.py --audio C:\tmp\gizzerg-smoke.wav --out C:\tmp\gizzerg-smoke-curve.json --sample-step-s 1`
   produced an `audio-features-librosa-v0.1` curve with dense points. Current
@@ -572,7 +572,7 @@ because it resolves to `npm.ps1`; use the direct Node command above.
 
 Current validation performed:
 
-- `node --test tests/*.test.mjs` passes: 73/73.
+- `node --test tests/*.test.mjs` passes: 75/75.
 - `node --check src\app.js` passes.
 - `node --check src\erg-controller.js` passes.
 - `node --check src\chart-window.js` passes.
@@ -625,12 +625,9 @@ round-trip to discover.
 - Current limitation: hovering near an annotation marker does not yet show its
   tag/note in the chart tooltip. The markers draw, but tooltip integration is
   still pending.
-- Current UX gotcha (issue #4): pressing a preset digit (1-5) inside the
-  overlay auto-submits immediately. To attach a note to a preset tag the rider
-  must type the note *first* and *then* press the digit. Riders who reach for
-  the digit first (its label names the tag) lose the qualitative context.
-  Validated 2026-05-27 smoke test in
-  `repos/sidecar/docs/recordings/f2-smoke-test.jsonl`.
+- Preset digits/buttons now select the draft tag rather than sending
+  immediately. After selecting a preset, the rider can type or edit the note
+  and press Enter/Send. This fixes issue #4's lost-context ordering trap.
 - Recovery note: `repos/sidecar/docs/recordings/music-tuning-01.jsonl` did not
   persist the user's typed semantic notes because it was recorded before the
   preset/hotkey note fix. The file still preserves 41 Motor Spirit marker

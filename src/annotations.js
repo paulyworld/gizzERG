@@ -9,7 +9,8 @@
 export const CLIENT_ID = "gizzERG";
 
 // Tag presets and their hotkeys. Hotkey is the digit pressed while the overlay
-// is open; tag is sent immediately with the current note text. The five preset slots bias
+// is open; tag is selected into the draft and sent only when the rider presses
+// Enter / Send. The five preset slots bias
 // toward the model-training feedback loop (per `concert-mode-exploration.md`
 // in the engine repo) — that's the primary purpose of F2 annotations once
 // terrain mode lands. Less-frequent tags (ui-pause, walk-away, false-intensity,
@@ -127,6 +128,18 @@ export function annotationRangeFromContext(context) {
     Number(context.annotation_range_end_s),
   );
 }
+
+/** Apply a preset to the in-progress annotation draft without discarding note text. */
+export function applyPresetToDraft(preset, draft = {}) {
+  if (!preset || typeof preset.tag !== "string" || preset.tag.length < 1) {
+    throw new Error("annotation preset is required");
+  }
+  return {
+    tag: preset.tag,
+    note: typeof draft.note === "string" ? draft.note : "",
+  };
+}
+
 
 /**
  * Build a recommended context blob from the current ride snapshot. Mirrors
