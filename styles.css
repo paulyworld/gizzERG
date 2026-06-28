@@ -763,18 +763,50 @@ h1 {
   outline-offset: -1px;
 }
 
-.annotation-range-field {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 4px 8px;
-  align-items: center;
-  color: #d9e2ef;
+.annotation-range-display {
   margin-bottom: 12px;
 }
 
-.annotation-range-field small {
-  grid-column: 2;
+.annotation-range-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 184, 64, 0.35);
+  background: rgba(255, 184, 64, 0.08);
+  color: #d9e2ef;
+  font-size: 13px;
+}
+
+.annotation-range-display[data-state="none"] .annotation-range-summary {
+  border-color: rgba(154, 166, 184, 0.25);
+  background: rgba(154, 166, 184, 0.05);
   color: #9aa6b8;
+}
+
+.annotation-range-icon {
+  font-weight: 700;
+  color: #ffb840;
+}
+
+.annotation-range-display[data-state="none"] .annotation-range-icon {
+  color: #9aa6b8;
+}
+
+#annotationClearRange {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid rgba(255, 184, 64, 0.4);
+  color: #ffb840;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+#annotationClearRange:hover {
+  background: rgba(255, 184, 64, 0.15);
 }
 
 .annotation-error {
