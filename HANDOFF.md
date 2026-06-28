@@ -3,7 +3,7 @@
 > Browser-based ERG controller experiment for the YouTube concert ride.
 
 **Last updated:** 2026-06-27
-**Current branch:** `docs/2026-06-27-reconcile-handoff` (handoff-only; code baseline aligned with `origin/develop` at `9e57784`)
+**Current branch:** `feat/range-annotations`
 **Current focus:** Music-intensity review and tuning UI for gizzERG. The app
 now supports selectable curve versions, a v0.4 subjective-feel curve,
 zoomable/tall timeline review, sidecar-backed F2 annotations, and Raw Feel
@@ -53,6 +53,8 @@ The detector is conservative: requires ≥6s of sustained low loudness, so brief
 ## ⚠️ Known UX gotcha (gizzERG issue #4)
 
 Pressing a preset digit (1-5) inside the F2 overlay auto-submits immediately. To attach a note to a preset tag, type the note *first*, then press the digit. Riders who reach for the digit first lose the qualitative context. Validated 2026-05-27 smoke test (`repos/sidecar/docs/recordings/f2-smoke-test.jsonl`); filed at https://github.com/paulyworld/gizzERG/issues/4 with three suggested fixes.
+
+**2026-06-27 range annotation update:** Chart Select mode now supports drag-to-select. The active selection renders as a translucent box, and the F2 overlay can attach the selected start/end range to an annotation. Echoed range annotations draw as labeled boxes across the chart, with tag + note text inside the box. Range metadata rides in the existing `annotate.context` fields, so no sidecar schema change is required.
 
 ## Current Shape
 
@@ -360,7 +362,7 @@ proved expensive but functional. Current local validation includes:
   succeeded on this machine.
 - `python -m unittest discover tools\profile-builder\tests` passes.
 - `python -m py_compile tools\profile-builder\build_profile.py` passes.
-- `node --test tests/*.test.mjs` passes: 69/69.
+- `node --test tests/*.test.mjs` passes: 73/73.
 - Synthetic WAV smoke test succeeded:
   `python tools\profile-builder\build_profile.py --audio C:\tmp\gizzerg-smoke.wav --out C:\tmp\gizzerg-smoke-curve.json --sample-step-s 1`
   produced an `audio-features-librosa-v0.1` curve with dense points. Current
@@ -570,7 +572,7 @@ because it resolves to `npm.ps1`; use the direct Node command above.
 
 Current validation performed:
 
-- `node --test tests/*.test.mjs` passes: 69/69.
+- `node --test tests/*.test.mjs` passes: 73/73.
 - `node --check src\app.js` passes.
 - `node --check src\erg-controller.js` passes.
 - `node --check src\chart-window.js` passes.
@@ -613,6 +615,10 @@ round-trip to discover.
 - Markers render as dashed amber verticals + a small triangle at the top of
   the ride chart. Density is glanceable; precise inspection comes from the
   JSONL recording.
+- Range annotations render as translucent amber boxes across the selected
+  time span. The box label includes the annotation tag and note when present.
+  Range metadata is stored in `context.annotation_range_start_s` /
+  `context.annotation_range_end_s`.
 - Current limitation: annotations require the sidecar WebSocket. Without the
   sidecar, F2 shows "sidecar not connected" and nothing is persisted. Offline
   browser-local annotations plus JSON export are the next useful tuning feature.

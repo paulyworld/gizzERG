@@ -4,8 +4,10 @@ import {
   ANNOTATION_LIMITS,
   CLIENT_ID,
   TAG_PRESETS,
+  annotationRangeFromContext,
   buildAnnotateCommand,
   buildContextSnapshot,
+  normalizeAnnotationRange,
   presetForHotkey,
 } from "../src/annotations.js";
 
@@ -101,6 +103,38 @@ test("presetForHotkey looks up by digit", () => {
   assert.equal(presetForHotkey("5")?.tag, "marker");
   assert.equal(presetForHotkey("9"), null);
   assert.equal(presetForHotkey(""), null);
+});
+
+test("normalizeAnnotationRange orders endpoints and records duration", () => {
+  assert.deepEqual(normalizeAnnotationRange(240, 120), {
+    start_s: 120,
+    end_s: 240,
+    duration_s: 120,
+  });
+});
+
+test("normalizeAnnotationRange rejects tiny or malformed ranges", () => {
+  assert.equal(normalizeAnnotationRange(120, 120.5), null);
+  assert.equal(normalizeAnnotationRange(Number.NaN, 130), null);
+  assert.equal(normalizeAnnotationRange(120, Number.POSITIVE_INFINITY), null);
+});
+
+test("annotationRangeFromContext reads echoed range metadata", () => {
+  const context = {
+    annotation_range_start_s: 1777,
+    annotation_range_end_s: 1795,
+    annotation_range_duration_s: 18,
+  };
+  assert.deepEqual(annotationRangeFromContext(context), {
+    start_s: 1777,
+    end_s: 1795,
+    duration_s: 18,
+  });
+});
+
+test("annotationRangeFromContext ignores missing range metadata", () => {
+  assert.equal(annotationRangeFromContext({ mode: "raw-feel" }), null);
+  assert.equal(annotationRangeFromContext(null), null);
 });
 
 test("buildContextSnapshot drops undefined and non-finite values", () => {

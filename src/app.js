@@ -1,8 +1,10 @@
 import {
   CLIENT_ID,
   TAG_PRESETS,
+  annotationRangeFromContext,
   buildAnnotateCommand,
   buildContextSnapshot,
+  normalizeAnnotationRange,
   presetForHotkey,
 } from "./annotations.js";
 import { concertProfiles } from "./concert-profile.js?v=subjective-v0.4-1";
@@ -134,6 +136,8 @@ const els = {
   annotationPresets: document.querySelector("#annotationPresets"),
   annotationTagInput: document.querySelector("#annotationTagInput"),
   annotationNoteInput: document.querySelector("#annotationNoteInput"),
+  annotationUseRangeInput: document.querySelector("#annotationUseRangeInput"),
+  annotationRangeText: document.querySelector("#annotationRangeText"),
   annotationError: document.querySelector("#annotationError"),
   annotationSubmit: document.querySelector("#annotationSubmit"),
   annotationCancel: document.querySelector("#annotationCancel"),
@@ -153,6 +157,7 @@ let currentCadence = 0;
 let currentHr = 0;
 let lastChartSampleSecond = -1;
 let hoverChartTime = null;
+let chartSelectionDragStart = null;
 let currentSongKey = "";
 const rideSamples = [];
 // Rider-pressed-F2 annotations as they come back from the sidecar as
@@ -190,7 +195,9 @@ updateAnalysis();
 drawRideChart();
 window.addEventListener("resize", drawRideChart);
 els.rideChart.addEventListener("mousemove", onRideChartMouseMove);
+els.rideChart.addEventListener("mousedown", onRideChartMouseDown);
 els.rideChart.addEventListener("mouseleave", onRideChartMouseLeave);
+window.addEventListener("mouseup", onRideChartMouseUp);
 els.rideChart.addEventListener("click", onRideChartClick);
 els.timelineSeekToggle.addEventListener("change", () => {
   els.rideChart.parentElement.classList.toggle("timeline-seek-enabled", els.timelineSeekToggle.checked);
@@ -643,10 +650,11 @@ function handleSidecarEvent(text) {
     const ann = {
       ts: event.ts,
       seq: event.seq,
-      videoTime: latestVideoTime,
+      videoTime: Number.isFinite(event.data?.client_time_s) ? event.data.client_time_s : latestVideoTime,
       tag: event.data?.tag ?? "",
       note: event.data?.note ?? "",
       clientId: event.data?.client_id ?? "",
+      range: annotationRangeFromContext(event.data?.context),
     };
     annotations.push(ann);
     const noteSuffix = ann.note ? ` — "${ann.note}"` : "";
@@ -1239,6 +1247,7 @@ function drawRideChart() {
   drawPlayhead(ctx, plotLeft, plotWidth, plotArea.top, plotArea.bottom);
   drawHoverLine(ctx, plotLeft, plotWidth, plotArea.top, plotArea.bottom);
   drawSelectionPreviewMarkers(ctx, plotLeft, plotWidth, plotArea.top, plotArea.bottom);
+  drawAnnotationRanges(ctx, plotArea, plotLeft, plotWidth);
   drawAnnotationMarkers(ctx, plotArea, plotLeft, plotWidth);
   drawChartLabels(ctx, width, height, plotArea, maxPower, minCadence, maxCadence, minMusicBpm, maxMusicBpm, chartWindow);
   drawElevationAxis(ctx, plotRight, plotArea);
@@ -1673,6 +1682,22 @@ function drawSelectionPreviewMarkers(ctx, plotLeft, plotWidth, top, bottom) {
   const chartWindow = currentChartWindow();
   const start = Number(els.chartStartSlider.value);
   const end = Number(els.chartEndSlider.value);
+  const range = normalizeAnnotationRange(start, end);
+  if (range) {
+    const visibleStart = Math.max(range.start_s, chartWindow.startS);
+    const visibleEnd = Math.min(range.end_s, chartWindow.endS);
+    if (visibleStart <= chartWindow.endS && visibleEnd >= chartWindow.startS) {
+      const x1 = timeToX(visibleStart, plotLeft, plotWidth);
+      const x2 = timeToX(visibleEnd, plotLeft, plotWidth);
+      ctx.save();
+      ctx.fillStyle = "rgba(34, 197, 94, 0.12)";
+      ctx.strokeStyle = "rgba(34, 197, 94, 0.58)";
+      ctx.setLineDash([6, 4]);
+      ctx.fillRect(x1, top, Math.max(2, x2 - x1), bottom - top);
+      ctx.strokeRect(x1, top + 0.5, Math.max(2, x2 - x1), bottom - top - 1);
+      ctx.restore();
+    }
+  }
   drawSelectionMarker(ctx, Math.min(start, end), "rgba(34, 197, 94, 0.95)", plotLeft, plotWidth, top, bottom, chartWindow);
   drawSelectionMarker(ctx, Math.max(start, end), "rgba(239, 68, 68, 0.95)", plotLeft, plotWidth, top, bottom, chartWindow);
 }
@@ -1778,18 +1803,32 @@ function derivedIntensityToY(intensity, area, maxPower) {
 }
 
 function onRideChartMouseMove(event) {
-  const canvas = els.rideChart;
-  const rect = canvas.getBoundingClientRect();
-  const padLeft = 44;
-  const padRight = 54;
-  const plotWidth = Math.max(1, rect.width - padLeft - padRight);
-  const x = Math.max(padLeft, Math.min(rect.width - padRight, event.clientX - rect.left));
-  hoverChartTime = xToTimeInWindow(x, padLeft, plotWidth, currentChartWindow());
+  hoverChartTime = chartTimeFromMouseEvent(event);
+  if (chartSelectionDragStart != null) {
+    updateChartSelectionDrag(hoverChartTime);
+  }
   updateRideChartTooltip(event, hoverChartTime);
   drawRideChart();
 }
 
+function onRideChartMouseDown(event) {
+  if (!els.chartSelectionToggle.checked || event.button !== 0) {
+    return;
+  }
+  event.preventDefault();
+  const time = chartTimeFromMouseEvent(event);
+  chartSelectionDragStart = time;
+  updateChartSelectionDrag(time);
+}
+
+function onRideChartMouseUp() {
+  chartSelectionDragStart = null;
+}
+
 function onRideChartClick(event) {
+  if (els.chartSelectionToggle.checked) {
+    return;
+  }
   if (!els.timelineSeekToggle.checked || hoverChartTime == null) {
     return;
   }
@@ -1807,6 +1846,27 @@ function onRideChartMouseLeave() {
   hoverChartTime = null;
   els.rideChartTooltip.hidden = true;
   drawRideChart();
+}
+
+function chartTimeFromMouseEvent(event) {
+  const canvas = els.rideChart;
+  const rect = canvas.getBoundingClientRect();
+  const padLeft = 44;
+  const padRight = 54;
+  const plotWidth = Math.max(1, rect.width - padLeft - padRight);
+  const x = Math.max(padLeft, Math.min(rect.width - padRight, event.clientX - rect.left));
+  return xToTimeInWindow(x, padLeft, plotWidth, currentChartWindow());
+}
+
+function updateChartSelectionDrag(time) {
+  const start = Math.round(Math.max(0, Math.min(profile.duration_s, chartSelectionDragStart ?? time)));
+  const end = Math.round(Math.max(0, Math.min(profile.duration_s, time)));
+  els.chartStartSlider.value = String(start);
+  els.chartEndSlider.value = String(end);
+  syncChartSelectionOutputs();
+  if (isAnnotationOverlayOpen()) {
+    syncAnnotationRangeDraft();
+  }
 }
 
 function updateRideChartTooltip(event, time) {
@@ -2143,6 +2203,7 @@ function openAnnotationOverlay() {
   els.annotationOverlay.hidden = false;
   els.annotationTagInput.value = "";
   els.annotationNoteInput.value = "";
+  syncAnnotationRangeDraft();
   hideAnnotationError();
   // Focus the first preset for hotkey discovery; rider can Tab to inputs.
   const firstPreset = els.annotationPresets.querySelector("button");
@@ -2192,6 +2253,26 @@ function currentAnnotationNote() {
   return els.annotationNoteInput.value.trim();
 }
 
+function selectedChartAnnotationRange() {
+  if (!els.chartSelectionToggle.checked) {
+    return null;
+  }
+  return normalizeAnnotationRange(
+    Number(els.chartStartSlider.value),
+    Number(els.chartEndSlider.value),
+  );
+}
+
+function syncAnnotationRangeDraft() {
+  const range = selectedChartAnnotationRange();
+  const hasRange = Boolean(range);
+  els.annotationUseRangeInput.checked = hasRange;
+  els.annotationUseRangeInput.disabled = !hasRange;
+  els.annotationRangeText.textContent = hasRange
+    ? `${formatTime(range.start_s)}-${formatTime(range.end_s)} (${formatTime(range.duration_s)})`
+    : "Enable Select on the chart to choose a span.";
+}
+
 function submitFromOverlayInputs() {
   const tag = els.annotationTagInput.value.trim();
   const note = currentAnnotationNote();
@@ -2209,6 +2290,7 @@ function sendAnnotation(tag, note = "") {
   }
   const target = controller.targetAt(latestVideoTime);
   const derived = derivedIntensityAt(latestVideoTime);
+  const annotationRange = els.annotationUseRangeInput.checked ? selectedChartAnnotationRange() : null;
   const context = buildContextSnapshot({
     profile_id: profile.id,
     profile_version: profile.version,
@@ -2224,6 +2306,9 @@ function sendAnnotation(tag, note = "") {
     hr: currentHr,
     wkg: target?.wkg,
     hardware_source: supportsTargetPower ? "trainer_power" : undefined,
+    annotation_range_start_s: annotationRange?.start_s,
+    annotation_range_end_s: annotationRange?.end_s,
+    annotation_range_duration_s: annotationRange?.duration_s,
   });
   let payload;
   try {
@@ -2231,7 +2316,7 @@ function sendAnnotation(tag, note = "") {
       tag,
       note: note || null,
       clientId: CLIENT_ID,
-      clientTimeS: Number.isFinite(latestVideoTime) && latestVideoTime > 0 ? latestVideoTime : null,
+      clientTimeS: annotationRange?.start_s ?? (Number.isFinite(latestVideoTime) && latestVideoTime > 0 ? latestVideoTime : null),
       context,
     });
   } catch (error) {
@@ -2250,6 +2335,38 @@ function showAnnotationError(message) {
 function hideAnnotationError() {
   els.annotationError.hidden = true;
   els.annotationError.textContent = "";
+}
+
+function drawAnnotationRanges(ctx, area, plotLeft, plotWidth) {
+  if (annotations.length === 0) {
+    return;
+  }
+  const chartWindow = currentChartWindow();
+  ctx.save();
+  for (const ann of annotations) {
+    const range = ann.range;
+    if (!range || range.end_s < chartWindow.startS || range.start_s > chartWindow.endS) {
+      continue;
+    }
+    const start = Math.max(range.start_s, chartWindow.startS);
+    const end = Math.min(range.end_s, chartWindow.endS);
+    const x1 = timeToX(start, plotLeft, plotWidth);
+    const x2 = timeToX(end, plotLeft, plotWidth);
+    const width = Math.max(2, x2 - x1);
+    ctx.fillStyle = "rgba(255, 209, 102, 0.16)";
+    ctx.strokeStyle = "rgba(255, 209, 102, 0.62)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 4]);
+    ctx.fillRect(x1, area.top, width, area.bottom - area.top);
+    ctx.strokeRect(x1, area.top + 0.5, width, area.bottom - area.top - 1);
+    ctx.setLineDash([]);
+    ctx.fillStyle = "rgba(255, 240, 188, 0.95)";
+    ctx.font = "11px system-ui, sans-serif";
+    const label = ann.note ? `${ann.tag || "annotation"}: ${ann.note}` : (ann.tag || "annotation");
+    const text = label.length > 40 ? `${label.slice(0, 37)}...` : label;
+    ctx.fillText(text, x1 + 5, area.top + 15);
+  }
+  ctx.restore();
 }
 
 function drawAnnotationMarkers(ctx, area, plotLeft, plotWidth) {
