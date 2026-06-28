@@ -140,6 +140,27 @@ export function applyPresetToDraft(preset, draft = {}) {
   };
 }
 
+/** Return the nearest annotation to `timeS`, or null when none is close enough. */
+export function nearestAnnotationAt(annotations, timeS, toleranceS = 5) {
+  if (!Array.isArray(annotations) || !Number.isFinite(timeS) || !Number.isFinite(toleranceS)) {
+    return null;
+  }
+  let nearest = null;
+  let nearestDelta = Infinity;
+  for (const annotation of annotations) {
+    const videoTime = annotation?.videoTime;
+    if (!Number.isFinite(videoTime)) {
+      continue;
+    }
+    const delta = Math.abs(videoTime - timeS);
+    if (delta < nearestDelta) {
+      nearest = annotation;
+      nearestDelta = delta;
+    }
+  }
+  return nearestDelta <= Math.max(0, toleranceS) ? nearest : null;
+}
+
 
 /**
  * Build a recommended context blob from the current ride snapshot. Mirrors
