@@ -8,6 +8,7 @@ import {
   applyPresetToDraft,
   buildAnnotateCommand,
   buildContextSnapshot,
+  nearestAnnotationAt,
   normalizeAnnotationRange,
   presetForHotkey,
 } from "../src/annotations.js";
@@ -150,6 +151,32 @@ test("applyPresetToDraft selects preset tag while preserving note", () => {
 
 test("applyPresetToDraft rejects missing presets", () => {
   assert.throws(() => applyPresetToDraft(null), /preset is required/);
+});
+
+test("nearestAnnotationAt returns the closest annotation inside tolerance", () => {
+  const annotations = [
+    { videoTime: 100, tag: "too-hard" },
+    { videoTime: 108, tag: "marker" },
+    { videoTime: 112, tag: "too-easy" },
+  ];
+  assert.equal(nearestAnnotationAt(annotations, 109, 5)?.tag, "marker");
+});
+
+test("nearestAnnotationAt returns null when no annotation is close enough", () => {
+  const annotations = [
+    { videoTime: 100, tag: "too-hard" },
+    { videoTime: 112, tag: "too-easy" },
+  ];
+  assert.equal(nearestAnnotationAt(annotations, 106, 5), null);
+});
+
+test("nearestAnnotationAt ignores malformed annotations", () => {
+  const annotations = [
+    { videoTime: "100", tag: "bad" },
+    null,
+    { videoTime: 103, tag: "marker" },
+  ];
+  assert.equal(nearestAnnotationAt(annotations, 102, 5)?.tag, "marker");
 });
 
 test("buildContextSnapshot drops undefined and non-finite values", () => {

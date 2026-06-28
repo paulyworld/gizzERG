@@ -5,6 +5,7 @@ import {
   applyPresetToDraft,
   buildAnnotateCommand,
   buildContextSnapshot,
+  nearestAnnotationAt,
   normalizeAnnotationRange,
   presetForHotkey,
 } from "./annotations.js";
@@ -1880,9 +1881,13 @@ function updateRideChartTooltip(event, time) {
   const derived = derivedIntensityAt(time);
   const terrainSample = nearestTerrainSample(time);
   const blendedIntensity = blendedTerrainIntensityAt(time);
+  const annotation = nearestAnnotationAt(annotations, time, 5);
   const sampleText = nearest
     ? `<span>Actual: ${nearest.power} W, ${nearest.cadence} rpm (${nearest.maintained ? "maintained" : "dropped"})</span>`
     : "<span>Actual: no sample yet</span>";
+  const annotationText = annotation
+    ? `<span>Annotation: ${escapeHtml(annotation.tag || "marker")}${annotation.note ? ` - ${escapeHtml(annotation.note)}` : ""} (${formatTime(annotation.videoTime)})</span>`
+    : "";
 
   els.rideChartTooltip.innerHTML = `
     <strong>${formatTime(time)} - ${escapeHtml(target.label)}</strong>
@@ -1901,6 +1906,7 @@ function updateRideChartTooltip(event, time) {
     <span>Route sample: ${terrainSample ? `${Math.round(terrainSample.smoothedIntensity * 100)}% smoothed, ${terrainSample.gradePercent.toFixed(1)}% grade` : "not available"}</span>
     <span>Power zone: ${powerZone}</span>
     <span>Cadence zone: ${cadenceZone}</span>
+    ${annotationText}
     ${sampleText}
   `;
   els.rideChartTooltip.hidden = false;
